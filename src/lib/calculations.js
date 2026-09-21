@@ -229,6 +229,29 @@ function simulacionCargaRestringida({ dias, kmDiaMedio, consumoKwh100km, potenci
   });
 }
 
+/**
+ * Agrupa una lista de horas sueltas (ya ordenadas cronologicamente, como
+ * devuelve seleccionaHorasMasBaratas) en bloques continuos de "enchufa
+ * desde las X hasta las Y", que es como se usa un cargador de verdad (una
+ * vez, no encendiendo y apagando cada hora suelta). Si hay huecos entre
+ * horas (p.ej. 19h y 22h porque 20h/21h eran mas caras), salen como
+ * bloques separados.
+ */
+function agrupaBloques(horasUsadas) {
+  const bloques = [];
+  for (const h of horasUsadas || []) {
+    const ultimo = bloques[bloques.length - 1];
+    const contiguo = ultimo && ultimo.fecha === h.fecha && ultimo.horaFin === h.hora;
+    if (contiguo) {
+      ultimo.horaFin = h.hora + 1;
+      ultimo.energiaKwh = Number((ultimo.energiaKwh + h.energiaKwh).toFixed(2));
+    } else {
+      bloques.push({ fecha: h.fecha, horaInicio: h.hora, horaFin: h.hora + 1, energiaKwh: h.energiaKwh });
+    }
+  }
+  return bloques;
+}
+
 module.exports = {
   costeDiesel,
   segmentosSesion,
@@ -237,6 +260,7 @@ module.exports = {
   evolucionMensual,
   diaSemanaUTC,
   horasPermitidasEnDia,
+  agrupaBloques,
   seleccionaHorasMasBaratas,
   simulacionCargaRestringida,
 };

@@ -15,6 +15,25 @@ function fechaISO(offsetDias = 0) {
   return toDateParam(d);
 }
 
+// "Enchufa de 19:00 a 20:00 y de 22:00 a 00:00" en vez de una lista suelta
+// de horas: asi es como se usa un cargador de verdad.
+function formatoBloques(horasUsadas) {
+  const bloques = calc.agrupaBloques(horasUsadas);
+  if (bloques.length === 0) return "sin horas disponibles";
+  const hoy = fechaISO(0);
+  let fechaAnterior = null;
+  return bloques
+    .map((b) => {
+      const cambiaDia = b.fecha && b.fecha !== fechaAnterior;
+      fechaAnterior = b.fecha;
+      const dia = cambiaDia ? (b.fecha === hoy ? "hoy " : "mañana ") : "";
+      const ini = String(b.horaInicio).padStart(2, "0");
+      const fin = String(b.horaFin % 24).padStart(2, "0");
+      return `${dia}de ${ini}:00 a ${fin}:00`;
+    })
+    .join(" y ");
+}
+
 // ---------- Precio diesel ----------
 
 async function obtenerPrecioDieselFresco() {
@@ -424,12 +443,14 @@ router.get("/recommend", async (req, res) => {
     // cuanto se publican (~20:30); mientras tanto, las horas que quedan hoy.
     const poolNecesario = disponiblesManana.length > 0 ? disponiblesManana : disponiblesHoy;
     const opcionSoloNecesario = calc.seleccionaHorasMasBaratas(poolNecesario, kwhDiaMedio, potenciaCargaKw);
+    opcionSoloNecesario.bloques = calc.agrupaBloques(opcionSoloNecesario.horasUsadas);
 
     // B) Cargar hasta el 100% ahora aprovechando lo mas barato de hoy+manana.
     const bateriaActualKwh = (bateriaActualPct / 100) * capacidadBateriaKwh;
     const margenKwh = Math.max(0, capacidadBateriaKwh - bateriaActualKwh);
     const poolCompleto = [...disponiblesHoy, ...disponiblesManana];
     const opcionCargaCompleta = calc.seleccionaHorasMasBaratas(poolCompleto, margenKwh, potenciaCargaKw);
+    opcionCargaCompleta.bloques = calc.agrupaBloques(opcionCargaCompleta.horasUsadas);
     const diasQueCubre = kwhDiaMedio > 0 && opcionCargaCompleta.energiaCubiertaKwh > 0 ? Number((opcionCargaCompleta.energiaCubiertaKwh / kwhDiaMedio).toFixed(1)) : 0;
 
     let recomendacion = null;
@@ -484,6 +505,9 @@ router.get("/electricity/simulation", async (req, res) => {
       potenciaCargaKw: settings.electrico.potenciaCargaKw,
       horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo,
       horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
+    });
+    dias.forEach((d) => {
+      d.bloques = calc.agrupaBloques(d.horasUsadas);
     });
 
     const totalCoste = dias.reduce((a, d) => a + d.costeTotal, 0);
@@ -547,9 +571,8 @@ router.post("/notify/nightly", async (req, res) => {
     const rec = calc.seleccionaHorasMasBaratas(poolNecesario, kwhDiaMedio, potenciaCargaKw);
 
     if (rec.horasUsadas.length > 0) {
-      const horas = rec.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
       lineas.push(
-        `🔌 Mejores horas para cargar mañana (${kwhDiaMedio.toFixed(1)} kWh, ~${rec.horasNecesarias}h a ${potenciaCargaKw}kW): <b>${horas}</b> · ${rec.precioMedioEurKwh.toFixed(4)} €/kWh de media · ${rec.costeTotal.toFixed(2)} €`
+        `🔌 Enchufa el coche <b>${formatoBloques(rec.horasUsadas)}</b> (${kwhDiaMedio.toFixed(1)} kWh, ~${rec.horasNecesarias}h a ${potenciaCargaKw}kW) · ${rec.precioMedioEurKwh.toFixed(4)} €/kWh de media · ${rec.costeTotal.toFixed(2)} €`
       );
     } else if (!mananaDisponible) {
       lineas.push("🔌 Los precios de mañana aún no están publicados (normalmente sobre las 20:30).");

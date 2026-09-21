@@ -104,15 +104,20 @@ async function cargaGraficoManana() {
   }
 }
 
-function formatoHorasLista(horasUsadas) {
-  if (!horasUsadas || horasUsadas.length === 0) return "sin horas disponibles";
-  // Si combina hoy y mañana, distingue por fecha en la etiqueta
-  const fechas = new Set(horasUsadas.map((h) => h.fecha).filter(Boolean));
-  if (fechas.size > 1) {
-    const hoyStr = new Date().toISOString().slice(0, 10);
-    return horasUsadas.map((h) => `${h.fecha === hoyStr ? "hoy" : "mañana"} ${String(h.hora).padStart(2, "0")}h`).join(", ");
-  }
-  return horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
+function formatoBloques(bloques) {
+  if (!bloques || bloques.length === 0) return "sin horas disponibles";
+  const hoyStr = new Date().toISOString().slice(0, 10);
+  let fechaAnterior = null;
+  return bloques
+    .map((b) => {
+      const cambiaDia = b.fecha && b.fecha !== fechaAnterior;
+      fechaAnterior = b.fecha;
+      const dia = cambiaDia ? `${b.fecha === hoyStr ? "hoy" : "mañana"} ` : "";
+      const ini = String(b.horaInicio).padStart(2, "0");
+      const fin = String(b.horaFin % 24).padStart(2, "0");
+      return `${dia}de ${ini}:00 a ${fin}:00`;
+    })
+    .join(" y ");
 }
 
 function tarjetaOpcion({ titulo, opcion, recomendada, extra }) {
@@ -128,7 +133,7 @@ function tarjetaOpcion({ titulo, opcion, recomendada, extra }) {
       <div class="detalle-linea">${opcion.energiaCubiertaKwh} kWh · ~${opcion.horasNecesarias} h de carga · ${fmtEur(opcion.costeTotal)} total</div>
       ${extra || ""}
       ${aviso}
-      <div class="horas-lista">${formatoHorasLista(opcion.horasUsadas)}</div>
+      <div class="horas-lista">🔌 Enchufa ${formatoBloques(opcion.bloques)}</div>
     </div>
   `;
 }
@@ -505,7 +510,6 @@ async function cargaSimulacion() {
       .reverse()
       .forEach((d) => {
         const diaSemana = DIAS_SEMANA_CORTO[new Date(d.fecha + "T00:00:00Z").getUTCDay()];
-        const horas = d.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${d.fecha}</td>
@@ -513,7 +517,7 @@ async function cargaSimulacion() {
           <td>${d.energiaNecesariaKwh} kWh</td>
           <td>${fmtEur(d.costeTotal)}</td>
           <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
-          <td>${horas || "—"}</td>
+          <td>${formatoBloques(d.bloques)}</td>
         `;
         tbody.appendChild(tr);
       });
