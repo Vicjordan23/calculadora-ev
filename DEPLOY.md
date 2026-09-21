@@ -73,6 +73,28 @@ Como Render gratis se duerme, necesitamos que algo externo llame a la app a las 
 
 Con esto, aunque tú no abras la app, los precios se mantienen actualizados solos.
 
+### Opcional: aviso nocturno por Telegram
+
+Si además quieres que la app te mande un mensaje cada noche con la franja más barata para cargar mañana (y avisos de precio raro del diésel / recordatorio si llevas días sin repostar):
+
+1. Habla con **@BotFather** en Telegram (búscalo dentro de la app de Telegram) y envíale `/newbot`. Te pedirá un nombre y un usuario para tu bot, y al final te da un **token** (algo como `123456:ABC-DEF...`).
+2. Busca tu bot recién creado por su usuario y envíale cualquier mensaje (por ejemplo "hola") para "activar" la conversación.
+3. Abre esta URL en el navegador, sustituyendo `<TOKEN>` por el token del bot:
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`
+   Busca en la respuesta `"chat":{"id":XXXXXXX` — ese número es tu **chat id**.
+4. En Render, ve a tu servicio → **Environment** → añade:
+   - `TELEGRAM_BOT_TOKEN` = el token del paso 1
+   - `TELEGRAM_CHAT_ID` = el número del paso 3
+5. Guarda — Render redespliega solo.
+6. En la propia app (sección "🔔 Notificaciones"), pulsa **"Enviar notificación de prueba"** para comprobar que te llega el mensaje a Telegram.
+7. En cron-job.org, crea un tercer cron job:
+   - **Título**: Aviso nocturno
+   - **URL**: `https://calculadora-ev.onrender.com/api/notify/nightly`
+   - **Método**: POST
+   - **Horario**: **20:40** (después de que se hayan refrescado los precios de mañana a las 20:35)
+
+Si no configuras esto, la app funciona exactamente igual, simplemente no manda avisos.
+
 ## 5. Usarla desde el móvil como si fuera una app
 
 1. Abre `https://calculadora-ev.onrender.com` en el navegador del móvil (Chrome/Safari).
@@ -95,4 +117,4 @@ Render vuelve a desplegar solo en cuanto detecta el push a GitHub (puede tardar 
 
 ## Cuando quieras dejar de depender de que Render "duerma"
 
-Si más adelante te compras un Raspberry Pi o similar para tener casa, puedes mover la misma app allí sin tocar código: simplemente no defines `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` (usará un fichero SQLite local) o los mantienes (sigue usando Turso) y ejecutas `npm start` directamente en el Pi, dejándolo siempre encendido. En ese caso los cron internos de `server.js` (que ya están programados a las mismas horas) hacen innecesario cron-job.org.
+Si más adelante te compras un Raspberry Pi o similar para tener casa, puedes mover la misma app allí sin tocar código: simplemente no defines `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` (usará un fichero SQLite local) o los mantienes (sigue usando Turso) y ejecutas `npm start` directamente en el Pi, dejándolo siempre encendido. En ese caso los cron internos de `server.js` (que ya están programados a las mismas horas, incluido el aviso nocturno a las 20:40) hacen innecesario cron-job.org.

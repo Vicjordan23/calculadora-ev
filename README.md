@@ -25,38 +25,19 @@ Ver [DEPLOY.md](DEPLOY.md) para la guía paso a paso: desplegar gratis en Render
 - Recomienda la franja horaria más barata para cargar, según las horas que necesites.
 - Registro de cargas reales: indicas fecha, hora de inicio, duración y batería antes/después (o kWh directos), y calcula el coste real usando el precio de cada hora concreta.
 - Registro de repostajes reales de diésel (mientras no tengas el eléctrico): litros, precio/L o coste total, y km del cuentakilómetros opcionales. Calcula gasto real acumulado del mes/año y el consumo real L/100km a partir de los km entre repostajes, para contrastarlo con la estimación teórica de los ajustes.
-- Ajustes editables: consumos, km/día y capacidad de batería.
-- Refresco automático programado: diesel a las 07:00 y 14:00, PVPC de mañana a las 20:35 y 21:00 (por si la publicación se retrasa). Además cada endpoint refresca solo si el dato en caché tiene más de 1h.
+- Gráfico de evolución mensual: gasto real (repostajes/cargas) frente al coste teórico de cada mes, calculado con el precio medio real de ese mes.
+- Exportar a CSV el historial de repostajes y de cargas.
+- Notificación nocturna por Telegram (opcional): franja más barata para cargar mañana, aviso si el diésel se mueve fuera de lo normal, y recordatorio si llevas días sin registrar un repostaje. Sin configurar, la app funciona igual, simplemente no avisa.
+- Formularios rápidos: los campos opcionales (fecha, km, kWh directos...) están plegados en "Más detalles" para que lo habitual (litros+precio, o duración+batería) se rellene en dos toques.
+- PWA instalable: manifest + iconos + service worker con cache del "cascarón" de la app (nunca de los precios), para que abra rápido y puedas añadirla a la pantalla de inicio del móvil.
+- Ajustes editables: consumos, km/día, capacidad de batería, horas de carga habituales y umbrales de notificación.
+- Refresco automático programado: diesel a las 07:00 y 14:00, PVPC de mañana a las 20:35 y 21:00 (por si la publicación se retrasa), aviso nocturno a las 20:40. Además cada endpoint refresca solo si el dato en caché tiene más de 1h.
 
 Los datos se guardan en SQLite vía [libSQL](https://turso.tech/libsql): en local usa automáticamente un fichero en `data/app.db` (cero configuración); en producción usa una base de datos Turso gratuita a través de las variables de entorno `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN` (ver `.env.example` y [DEPLOY.md](DEPLOY.md)).
 
-## Ideas para ampliar
+## Ideas para ampliar (pendientes, a propósito fuera de alcance por ahora)
 
-**Seguimiento y análisis**
-- Gráfico de evolución del gasto real mes a mes (diésel ya se registra; falta lo mismo para el eléctrico cuando llegue el coche).
-- Comparar gasto real vs. estimación teórica para afinar los ajustes (consumo, km/día).
-- Exportar a Excel/CSV el historial de repostajes/cargas.
-
-**Notificaciones**
-- Aviso (push, email o Telegram) cada noche a las 20:35 con la franja más barata para cargar al día siguiente.
-- Alerta si el precio del diésel o el PVPC se sale mucho de lo habitual.
-- Recordatorio si llevas varios días sin registrar un repostaje/carga.
-
-**Multi-vehículo / multi-tarifa**
-- Soportar más de un coche.
-- Comparar también con otra tarifa eléctrica (mercado libre a precio fijo) además de PVPC.
-- Comparar con gasolina 95/98 además de diésel.
-- Comparar con carga rápida fuera de casa (Supercharger u otros) para los días que no cargues en casa.
-
-**Integraciones**
-- Detección automática de sesión de carga conectando con la API de Tesla (Tessie, TeslaMate, etc.) en vez de introducirla a mano.
+- **Multi-vehículo / multi-tarifa**: soportar más de un coche, otra tarifa eléctrica (mercado libre) o comparar con gasolina 95/98.
+- **Integración con la API de Tesla** (Tessie, TeslaMate...) para registrar cargas solas en vez de a mano — con sentido en cuanto llegue el coche.
+- **Visión financiera más amplia**: coste total de propiedad (TCO) con seguro/mantenimiento/impuestos, simulador de punto de equilibrio, modo "coste por viaje".
 - Importar la factura PDF de la luz para contrastar el coste real facturado vs. el PVPC teórico.
-
-**Visión financiera más amplia**
-- **Coste total de propiedad (TCO)**: sumar seguro, mantenimiento e impuesto de circulación, no solo combustible/electricidad.
-- Simulador de "punto de equilibrio": cuánto se tarda en amortizar el sobrecoste del Tesla frente a un diésel equivalente, dado el ahorro real mensual.
-- Modo "coste por viaje": calcular un trayecto puntual (ej. viaje largo) con el precio real esperado, en vez de solo la media diaria.
-
-**UX**
-- PWA de verdad (funciona offline, arranca más rápido) en vez de solo "añadir a inicio".
-- Formulario simplificado de un solo toque para registrar un repostaje/carga desde el móvil.

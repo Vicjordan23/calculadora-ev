@@ -115,6 +115,52 @@ function costeSesionCarga({ fecha, horaInicio, duracionHoras, kwhCargados, getPr
   };
 }
 
+/**
+ * Agrupa registros reales (repostajes o cargas) por mes y los compara con un
+ * coste teorico calculado a partir del precio medio real de ese mes (segun
+ * el historico de precios) y los km/consumo configurados en ajustes.
+ * Sirve tanto para diesel (litros/L100km) como electrico (kWh/kWh100km).
+ *
+ * @param {Array<{fecha, costeTotal}>} registros gastos reales (repostajes o cargas)
+ * @param {Array<{fecha, precio}>} historicoPrecios precio medio diario historico
+ * @param {number} kmDiaMedio
+ * @param {number} consumoPor100km L o kWh por 100km
+ */
+function evolucionMensual({ registros, historicoPrecios, kmDiaMedio, consumoPor100km }) {
+  const real = {};
+  for (const r of registros) {
+    const mes = r.fecha.slice(0, 7);
+    real[mes] = real[mes] || { total: 0, registros: 0 };
+    real[mes].total += r.costeTotal;
+    real[mes].registros += 1;
+  }
+
+  const preciosPorMes = {};
+  for (const h of historicoPrecios) {
+    const mes = h.fecha.slice(0, 7);
+    preciosPorMes[mes] = preciosPorMes[mes] || [];
+    preciosPorMes[mes].push(h.precio);
+  }
+
+  const meses = new Set([...Object.keys(real), ...Object.keys(preciosPorMes)]);
+
+  return [...meses].sort().map((mes) => {
+    const preciosDelMes = preciosPorMes[mes];
+    const precioMedio = preciosDelMes && preciosDelMes.length ? preciosDelMes.reduce((a, b) => a + b, 0) / preciosDelMes.length : null;
+
+    const [y, m] = mes.split("-").map(Number);
+    const diasDelMes = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const teorico = precioMedio != null ? Number(((kmDiaMedio / 100) * consumoPor100km * precioMedio * diasDelMes).toFixed(2)) : null;
+
+    return {
+      mes,
+      real: Number((real[mes]?.total || 0).toFixed(2)),
+      registros: real[mes]?.registros || 0,
+      teorico,
+    };
+  });
+}
+
 module.exports = {
   costeDiesel,
   costeElectrico,
@@ -122,4 +168,5 @@ module.exports = {
   segmentosSesion,
   costeSesionCarga,
   sumaDiasISO,
+  evolucionMensual,
 };

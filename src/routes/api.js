@@ -4,6 +4,7 @@ const { fetchDieselPrice } = require("../fetchers/diesel");
 const { fetchElectricityPrices, toDateParam } = require("../fetchers/electricity");
 const calc = require("../lib/calculations");
 const { mejorVentana, construyeSerie } = require("../lib/recommend");
+const { sendTelegramMessage, telegramConfigurado } = require("../lib/telegram");
 
 const router = express.Router();
 
@@ -276,7 +277,61 @@ router.delete("/diesel/fills/:id", async (req, res) => {
   res.json(await store.deleteDieselFill(req.params.id));
 });
 
+// ---------- Evolucion mensual (real vs teorico) ----------
+
+router.get("/diesel/evolution", async (req, res) => {
+  try {
+    const [fills, history, settings] = await Promise.all([store.getDieselFills(), store.getDieselHistory(), store.getSettings()]);
+    const evolucion = calc.evolucionMensual({
+      registros: fills.map((f) => ({ fecha: f.fecha, costeTotal: f.costeTotal })),
+      historicoPrecios: history.map((h) => ({ fecha: h.fecha, precio: h.precioPorLitro })),
+      kmDiaMedio: settings.diesel.kmDiaMedio,
+      consumoPor100km: settings.diesel.consumoL100km,
+    });
+    res.json(evolucion);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/electricity/evolution", async (req, res) => {
+  try {
+    const [charges, history, settings] = await Promise.all([store.getCharges(), store.getElectricityHistory(), store.getSettings()]);
+    const evolucion = calc.evolucionMensual({
+      registros: charges.map((c) => ({ fecha: c.fecha, costeTotal: c.costeTotal })),
+      historicoPrecios: history.map((h) => ({ fecha: h.fecha, precio: h.precioMedioEurKwh })),
+      kmDiaMedio: settings.electrico.kmDiaMedio,
+      consumoPor100km: settings.electrico.consumoKwh100km,
+    });
+    res.json(evolucion);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------- Recomendacion de horario de carga ----------
+
+async function calcularRecomendacion(duracionHoras) {
+  const hoy = fechaISO(0);
+  const manana = fechaISO(1);
+
+  const [precioHoy, precioManana] = await Promise.all([
+    obtenerPreciosDia(hoy).catch(() => null),
+    obtenerPreciosDia(manana).catch(() => null),
+  ]);
+
+  const serieHoy = precioHoy ? construyeSerie([precioHoy]) : [];
+  const serieCompleta = construyeSerie([precioHoy, precioManana].filter(Boolean));
+
+  return {
+    mananaDisponible: !!precioManana,
+    avisoManana: precioManana
+      ? null
+      : "Los precios de manana se publican sobre las 20:30. Hasta entonces solo se puede recomendar dentro de las horas de hoy que queden.",
+    recomendacionHoy: mejorVentana(serieHoy, duracionHoras),
+    recomendacionConManana: mejorVentana(serieCompleta, duracionHoras),
+  };
+}
 
 router.get("/recommend", async (req, res) => {
   try {
@@ -284,29 +339,83 @@ router.get("/recommend", async (req, res) => {
     if (!(duracionHoras > 0)) {
       return res.status(400).json({ error: "Parametro duracionHoras invalido" });
     }
+    res.json(await calcularRecomendacion(duracionHoras));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    const hoy = fechaISO(0);
-    const manana = fechaISO(1);
+// ---------- Notificaciones (Telegram) ----------
 
-    const [precioHoy, precioManana] = await Promise.all([
-      obtenerPreciosDia(hoy).catch(() => null),
-      obtenerPreciosDia(manana).catch(() => null),
-    ]);
+router.get("/notify/status", (req, res) => {
+  res.json({ configurado: telegramConfigurado() });
+});
 
-    const serieHoy = precioHoy ? construyeSerie([precioHoy]) : [];
-    const serieCompleta = construyeSerie([precioHoy, precioManana].filter(Boolean));
+router.post("/notify/test", async (req, res) => {
+  try {
+    const resultado = await sendTelegramMessage("🔧 Prueba de notificacion desde la calculadora EV vs Diesel. Si ves esto, Telegram esta bien configurado.");
+    res.json(resultado);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
-    const recomendacionHoy = mejorVentana(serieHoy, duracionHoras);
-    const recomendacionCompleta = mejorVentana(serieCompleta, duracionHoras);
+// Aviso nocturno: se pensó para lanzarse ~20:40 (tras publicarse el PVPC de
+// mañana). Junta la franja mas barata para cargar, un aviso si el diesel se
+// sale de lo normal, y un recordatorio si llevas dias sin registrar un
+// repostaje. Pensado para cron-job.org (Render duerme) o el cron interno
+// de server.js si esto corre en una maquina siempre encendida.
+router.post("/notify/nightly", async (req, res) => {
+  try {
+    const settings = await store.getSettings();
+    const duracionHoras = Number(req.query.duracionHoras) || settings.electrico.horasCargaHabitual || 4;
 
-    res.json({
-      mananaDisponible: !!precioManana,
-      avisoManana: precioManana
-        ? null
-        : "Los precios de manana se publican sobre las 20:30. Hasta entonces solo se puede recomendar dentro de las horas de hoy que queden.",
-      recomendacionHoy,
-      recomendacionConManana: recomendacionCompleta,
-    });
+    const lineas = [];
+
+    const recomendacion = await calcularRecomendacion(duracionHoras);
+    const ventana = recomendacion.recomendacionConManana;
+    if (ventana) {
+      const inicio = `${String(ventana.inicio.hora).padStart(2, "0")}:00`;
+      const fin = `${String((ventana.fin.hora + 1) % 24).padStart(2, "0")}:00`;
+      lineas.push(
+        `🔌 Mejor franja para cargar ${duracionHoras}h: <b>${inicio}–${fin}</b> (${ventana.inicio.fecha}) · ${ventana.precioMedioEurKwh.toFixed(4)} €/kWh de media`
+      );
+    } else if (!recomendacion.mananaDisponible) {
+      lineas.push("🔌 Los precios de mañana aún no están publicados (normalmente sobre las 20:30).");
+    }
+
+    const historial = await store.getDieselHistory();
+    const dieselActual = await store.getDieselCache();
+    const umbral = settings.notificaciones.umbralAnomaliaPct;
+    if (dieselActual && historial.length >= 5) {
+      const ultimos = historial.slice(0, 30).map((h) => h.precioPorLitro);
+      const media = ultimos.reduce((a, b) => a + b, 0) / ultimos.length;
+      const deltaPct = ((dieselActual.precioPorLitro - media) / media) * 100;
+      if (Math.abs(deltaPct) >= umbral) {
+        const flecha = deltaPct > 0 ? "📈 subiendo" : "📉 bajando";
+        lineas.push(
+          `⛽ El diésel está ${flecha}: ${dieselActual.precioPorLitro.toFixed(3)} €/L (${deltaPct > 0 ? "+" : ""}${deltaPct.toFixed(1)}% vs. media de los últimos ${ultimos.length} días)`
+        );
+      }
+    }
+
+    const fills = await store.getDieselFills();
+    const diasAviso = settings.notificaciones.avisoStaleDias;
+    if (fills.length > 0) {
+      const ultimo = fills[fills.length - 1];
+      const diasDesde = Math.floor((Date.now() - new Date(ultimo.fecha + "T00:00:00").getTime()) / 86400000);
+      if (diasDesde >= diasAviso) {
+        lineas.push(`📝 Llevas ${diasDesde} días sin registrar un repostaje de diésel.`);
+      }
+    }
+
+    if (lineas.length === 0) {
+      lineas.push("Sin novedades por hoy.");
+    }
+
+    const mensaje = `<b>Resumen EV vs Diesel</b>\n\n${lineas.join("\n")}`;
+    const resultadoTelegram = await sendTelegramMessage(mensaje);
+    res.json({ mensaje, telegram: resultadoTelegram });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,7 +1,7 @@
 const fmtEur = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
 const fmtEur3 = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €`);
 
-let chartHoy, chartManana;
+let chartHoy, chartManana, chartEvolucionDiesel, chartEvolucionElectrico;
 let ultimoPrecioDiesel = null;
 
 async function api(path, options) {
@@ -79,6 +79,11 @@ async function cargaResumen() {
   document.getElementById("set-elec-consumo").value = s.electrico.consumoKwh100km;
   document.getElementById("set-elec-capacidad").value = s.electrico.capacidadBateriaKwh;
   document.getElementById("set-elec-km").value = s.electrico.kmDiaMedio;
+  document.getElementById("set-elec-horas").value = s.electrico.horasCargaHabitual;
+  document.getElementById("set-notif-dias").value = s.notificaciones.avisoStaleDias;
+  document.getElementById("set-notif-umbral").value = s.notificaciones.umbralAnomaliaPct;
+  const recDuracion = document.getElementById("rec-duracion");
+  if (!recDuracion.dataset.tocado) recDuracion.value = s.electrico.horasCargaHabitual;
 }
 
 async function cargaGraficoManana() {
@@ -300,6 +305,10 @@ function initFormularios() {
     }
   });
 
+  document.getElementById("rec-duracion").addEventListener("input", (e) => {
+    e.target.dataset.tocado = "1";
+  });
+
   document.getElementById("form-ajustes").addEventListener("submit", async (e) => {
     e.preventDefault();
     await api("/settings", {
@@ -313,10 +322,132 @@ function initFormularios() {
           consumoKwh100km: Number(document.getElementById("set-elec-consumo").value),
           capacidadBateriaKwh: Number(document.getElementById("set-elec-capacidad").value),
           kmDiaMedio: Number(document.getElementById("set-elec-km").value),
+          horasCargaHabitual: Number(document.getElementById("set-elec-horas").value),
+        },
+        notificaciones: {
+          avisoStaleDias: Number(document.getElementById("set-notif-dias").value),
+          umbralAnomaliaPct: Number(document.getElementById("set-notif-umbral").value),
         },
       }),
     });
     cargaResumen();
+  });
+
+  document.getElementById("btn-notify-test").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const resultado = document.getElementById("notify-resultado");
+    resultado.innerHTML = "Enviando...";
+    try {
+      const data = await api("/notify/test", { method: "POST" });
+      resultado.innerHTML = data.enviado
+        ? `<div class="ok">✅ Enviado a Telegram.</div>`
+        : `<div class="warn">${data.motivo}</div>`;
+    } catch (err) {
+      resultado.innerHTML = `<div class="err">${err.message}</div>`;
+    }
+  });
+
+  document.getElementById("btn-csv-repostajes").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const fills = await api("/diesel/fills");
+    descargaCSV(
+      "repostajes-diesel.csv",
+      fills,
+      ["fecha", "litros", "precioPorLitro", "costeTotal", "kmOdometro", "estacion"],
+      ["Fecha", "Litros", "Precio/L", "Coste total", "Km", "Gasolinera"]
+    );
+  });
+
+  document.getElementById("btn-csv-cargas").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const charges = await api("/charges");
+    descargaCSV(
+      "cargas-electrico.csv",
+      charges,
+      ["fecha", "horaInicio", "duracionHoras", "kwhCargados", "costeTotal", "precioMedioEurKwh"],
+      ["Fecha", "Hora inicio", "Duración (h)", "kWh", "Coste total", "€/kWh medio"]
+    );
+  });
+}
+
+function descargaCSV(nombreArchivo, filas, campos, cabeceras) {
+  const escapa = (v) => {
+    if (v == null) return "";
+    const s = String(v).replace(/"/g, '""');
+    return /[",;\n]/.test(s) ? `"${s}"` : s;
+  };
+  const lineas = [cabeceras.join(";"), ...filas.map((f) => campos.map((c) => escapa(f[c])).join(";"))];
+  const blob = new Blob([lineas.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function coloresEvolucion() {
+  return { real: "#e0a24a", teorico: "#4a5568" };
+}
+
+function pintaGraficoEvolucion(canvasId, chartRef, datos, colorReal) {
+  const ctx = document.getElementById(canvasId);
+  const labels = datos.map((d) => d.mes);
+  const { teorico } = coloresEvolucion();
+
+  if (chartRef) chartRef.destroy();
+  return new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Real", data: datos.map((d) => d.real), backgroundColor: colorReal, borderRadius: 4 },
+        { label: "Estimado (teórico)", data: datos.map((d) => d.teorico), backgroundColor: teorico, borderRadius: 4 },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true, labels: { color: "#9aa1ac" } } },
+      scales: {
+        x: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" } },
+        y: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+async function cargaEvolucion() {
+  try {
+    const dataDiesel = await api("/diesel/evolution");
+    chartEvolucionDiesel = pintaGraficoEvolucion("chart-evolucion-diesel", chartEvolucionDiesel, dataDiesel, "#e0a24a");
+  } catch (err) {
+    /* silencioso: sin datos suficientes */
+  }
+  try {
+    const dataElectrico = await api("/electricity/evolution");
+    chartEvolucionElectrico = pintaGraficoEvolucion("chart-evolucion-electrico", chartEvolucionElectrico, dataElectrico, "#4ac0e0");
+  } catch (err) {
+    /* silencioso */
+  }
+}
+
+async function cargaEstadoNotificaciones() {
+  const el = document.getElementById("notify-status");
+  try {
+    const data = await api("/notify/status");
+    el.textContent = data.configurado
+      ? "✅ Telegram configurado."
+      : "⚠️ Telegram no configurado todavía (variables TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID no definidas). El resto de la app funciona igual sin esto.";
+  } catch (err) {
+    el.textContent = "";
+  }
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
   });
 }
 
@@ -325,3 +456,5 @@ cargaResumen();
 cargaGraficoManana();
 cargaTablaCargas();
 cargaTablaRepostajes();
+cargaEvolucion();
+cargaEstadoNotificaciones();

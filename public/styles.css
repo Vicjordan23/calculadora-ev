@@ -158,10 +158,44 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   color: var(--diesel);
 }
 
+.mas-detalles {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.mas-detalles summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  user-select: none;
+}
+.mas-detalles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+}
+
+.tabla-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+.tabla-header .btn-secondary { margin-top: 0; }
+
 .tabla-cargas {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 18px;
+  margin-top: 8px;
   font-size: 0.88rem;
 }
 .tabla-cargas th, .tabla-cargas td {

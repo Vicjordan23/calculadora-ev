@@ -45,3 +45,19 @@ cron.schedule("35 20,21 * * *", async () => {
     console.error("[cron] Error actualizando precios PVPC de manana:", err.message);
   }
 });
+
+// Aviso nocturno por Telegram (recomendacion de carga + alertas). Solo tiene
+// efecto si TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID estan configurados; si no,
+// el endpoint no hace nada. Util cuando esto corre en una maquina siempre
+// encendida (Raspberry Pi, PC de casa...); en Render gratis usa en su lugar
+// un cron externo (cron-job.org) porque el servicio duerme y este cron
+// interno no se ejecutaria (ver DEPLOY.md).
+cron.schedule("40 20 * * *", async () => {
+  try {
+    const res = await fetch(`http://localhost:${PORT}/api/notify/nightly`, { method: "POST" });
+    const data = await res.json();
+    console.log("[cron] Aviso nocturno:", data.telegram?.enviado ? "enviado" : data.telegram?.motivo || data.error);
+  } catch (err) {
+    console.error("[cron] Error en aviso nocturno:", err.message);
+  }
+});

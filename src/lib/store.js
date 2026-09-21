@@ -10,6 +10,11 @@ const DEFAULT_SETTINGS = {
     consumoKwh100km: 15,
     capacidadBateriaKwh: 62.5,
     kmDiaMedio: 80,
+    horasCargaHabitual: 4,
+  },
+  notificaciones: {
+    avisoStaleDias: 10,
+    umbralAnomaliaPct: 3,
   },
 };
 
@@ -34,6 +39,7 @@ async function getSettings() {
   return {
     diesel: { ...DEFAULT_SETTINGS.diesel, ...(stored.diesel || {}) },
     electrico: { ...DEFAULT_SETTINGS.electrico, ...(stored.electrico || {}) },
+    notificaciones: { ...DEFAULT_SETTINGS.notificaciones, ...(stored.notificaciones || {}) },
   };
 }
 
@@ -42,6 +48,7 @@ async function saveSettings(partial) {
   const merged = {
     diesel: { ...current.diesel, ...(partial.diesel || {}) },
     electrico: { ...current.electrico, ...(partial.electrico || {}) },
+    notificaciones: { ...current.notificaciones, ...(partial.notificaciones || {}) },
   };
   await setKv("settings", merged);
   return merged;
@@ -80,7 +87,24 @@ async function saveElectricityPrices(dayResult) {
     sql: "INSERT INTO electricity_cache (fecha, payload) VALUES (?, ?) ON CONFLICT(fecha) DO UPDATE SET payload = excluded.payload",
     args: [dayResult.fecha, JSON.stringify(dayResult)],
   });
+
+  if (dayResult.horas && dayResult.horas.length > 0) {
+    const media = dayResult.horas.reduce((a, h) => a + h.precioEurKwh, 0) / dayResult.horas.length;
+    await client.execute({
+      sql: "INSERT INTO electricity_history (fecha, precio_medio_eur_kwh) VALUES (?, ?) ON CONFLICT(fecha) DO UPDATE SET precio_medio_eur_kwh = excluded.precio_medio_eur_kwh",
+      args: [dayResult.fecha, Number(media.toFixed(5))],
+    });
+  }
+
   return dayResult;
+}
+
+async function getElectricityHistory() {
+  await init();
+  const res = await client.execute(
+    "SELECT fecha, precio_medio_eur_kwh AS precioMedioEurKwh FROM electricity_history ORDER BY fecha DESC LIMIT 365"
+  );
+  return res.rows.map((r) => ({ fecha: r.fecha, precioMedioEurKwh: r.precioMedioEurKwh }));
 }
 
 async function getCharges() {
@@ -193,6 +217,7 @@ module.exports = {
   getDieselHistory,
   getElectricityForDate,
   saveElectricityPrices,
+  getElectricityHistory,
   getCharges,
   addCharge,
   deleteCharge,

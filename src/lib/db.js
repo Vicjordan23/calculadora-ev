@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS diesel_fills (
   notas TEXT,
   creado_en TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS electricity_history (
+  fecha TEXT PRIMARY KEY,
+  precio_medio_eur_kwh REAL NOT NULL
+);
 `;
 
 let ready = null;

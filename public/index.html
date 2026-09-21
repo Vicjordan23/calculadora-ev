@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Tesla vs Diesel — Calculadora de gasto</title>
 <link rel="stylesheet" href="styles.css" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="theme-color" content="#0f1115" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="EV vs Diesel" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body>
@@ -55,11 +62,8 @@
     <h2>⛽ Repostajes de diésel (gasto real)</h2>
     <p class="hint">Mientras no tengas el eléctrico, registra aquí cada repostaje para ir viendo lo que gastas de verdad, no solo la estimación teórica de arriba.</p>
     <form id="form-repostaje" class="grid-form">
-      <label>Fecha
-        <input type="date" id="rep-fecha" required />
-      </label>
       <label>Litros
-        <input type="number" id="rep-litros" min="0.1" step="0.01" required />
+        <input type="number" id="rep-litros" min="0.1" step="0.01" required autofocus />
       </label>
       <label>Precio/L (€)
         <input type="number" id="rep-precio" min="0" step="0.001" placeholder="se rellena solo" />
@@ -67,24 +71,42 @@
       <label>o coste total (€)
         <input type="number" id="rep-total" min="0" step="0.01" placeholder="opcional, si no sabes el €/L" />
       </label>
-      <label>Km del cuentakilómetros
-        <input type="number" id="rep-km" min="0" step="1" placeholder="opcional" />
-      </label>
-      <label>Gasolinera
-        <input type="text" id="rep-estacion" placeholder="opcional" />
-      </label>
+      <details class="mas-detalles">
+        <summary>Más detalles (fecha, km, gasolinera)</summary>
+        <div class="mas-detalles-grid">
+          <label>Fecha
+            <input type="date" id="rep-fecha" required />
+          </label>
+          <label>Km del cuentakilómetros
+            <input type="number" id="rep-km" min="0" step="1" placeholder="opcional" />
+          </label>
+          <label>Gasolinera
+            <input type="text" id="rep-estacion" placeholder="opcional" />
+          </label>
+        </div>
+      </details>
       <button type="submit" class="btn-primary">Guardar repostaje</button>
     </form>
     <div id="repostaje-resultado" class="recomendacion"></div>
 
     <div class="stats-repostajes" id="stats-repostajes"></div>
 
+    <div class="tabla-header">
+      <button class="btn-secondary" id="btn-csv-repostajes">Exportar CSV</button>
+    </div>
     <table class="tabla-cargas" id="tabla-repostajes">
       <thead>
         <tr><th>Fecha</th><th>Litros</th><th>€/L</th><th>Total</th><th>Km</th><th>Consumo real</th><th></th></tr>
       </thead>
       <tbody></tbody>
     </table>
+  </section>
+
+  <section class="panel">
+    <h2>📈 Evolución mensual (real vs. estimado)</h2>
+    <p class="hint">Gasto real registrado cada mes frente a lo que costaría según los ajustes y el precio medio real de ese mes.</p>
+    <canvas id="chart-evolucion-diesel" height="100"></canvas>
+    <canvas id="chart-evolucion-electrico" height="100" style="margin-top:24px"></canvas>
   </section>
 
   <section class="panel">
@@ -113,9 +135,6 @@
     <h2>Registrar una carga</h2>
     <p class="hint">Pon cuántas horas ha estado cargando el coche y la batería antes/después (o directamente los kWh) para calcular el coste real según los precios de esas horas.</p>
     <form id="form-carga" class="grid-form">
-      <label>Fecha de inicio
-        <input type="date" id="carga-fecha" required />
-      </label>
       <label>Hora de inicio (0-23)
         <input type="number" id="carga-hora" min="0" max="23" required />
       </label>
@@ -128,19 +147,38 @@
       <label>Batería después (%)
         <input type="number" id="carga-bat-despues" min="0" max="100" />
       </label>
-      <label>o kWh cargados directamente
-        <input type="number" id="carga-kwh" min="0" step="0.1" placeholder="opcional" />
-      </label>
+      <details class="mas-detalles">
+        <summary>Más detalles (fecha, kWh directos)</summary>
+        <div class="mas-detalles-grid">
+          <label>Fecha de inicio
+            <input type="date" id="carga-fecha" required />
+          </label>
+          <label>o kWh cargados directamente
+            <input type="number" id="carga-kwh" min="0" step="0.1" placeholder="opcional" />
+          </label>
+        </div>
+      </details>
       <button type="submit" class="btn-primary">Guardar carga</button>
     </form>
     <div id="carga-resultado" class="recomendacion"></div>
 
+    <div class="tabla-header">
+      <button class="btn-secondary" id="btn-csv-cargas">Exportar CSV</button>
+    </div>
     <table class="tabla-cargas" id="tabla-cargas">
       <thead>
         <tr><th>Fecha</th><th>Inicio</th><th>Duración</th><th>kWh</th><th>Coste</th><th>€/kWh medio</th><th></th></tr>
       </thead>
       <tbody></tbody>
     </table>
+  </section>
+
+  <section class="panel">
+    <h2>🔔 Notificaciones (Telegram)</h2>
+    <p class="hint">Aviso nocturno con la franja más barata para cargar mañana, alertas de precio del diésel fuera de lo normal, y recordatorio si llevas días sin registrar un repostaje. Configúralo con las variables de entorno <code>TELEGRAM_BOT_TOKEN</code> y <code>TELEGRAM_CHAT_ID</code> (ver DEPLOY.md).</p>
+    <div id="notify-status" class="fetch-meta">Comprobando…</div>
+    <button class="btn-secondary" id="btn-notify-test">Enviar notificación de prueba</button>
+    <div id="notify-resultado" class="recomendacion"></div>
   </section>
 
   <section class="panel">
@@ -165,6 +203,18 @@
         </label>
         <label>Km/día de media
           <input type="number" id="set-elec-km" step="1" />
+        </label>
+        <label>Horas de carga habituales
+          <input type="number" id="set-elec-horas" step="0.5" min="0.5" />
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Notificaciones</legend>
+        <label>Avisar si llevo más de (días sin repostar)
+          <input type="number" id="set-notif-dias" step="1" min="1" />
+        </label>
+        <label>Avisar si el diésel se mueve más de (%)
+          <input type="number" id="set-notif-umbral" step="0.5" min="0.5" />
         </label>
       </fieldset>
       <button type="submit" class="btn-primary">Guardar ajustes</button>
