@@ -14,6 +14,10 @@ npm start
 
 Abre `http://localhost:3000`.
 
+## Usarla desde casa y desde el móvil (no solo en este PC)
+
+Ver [DEPLOY.md](DEPLOY.md) para la guía paso a paso: desplegar gratis en Render + Turso y acceder desde cualquier sitio.
+
 ## Qué hace ahora mismo
 
 - Compara coste diario/mensual/anual diesel vs eléctrico con precios de hoy.
@@ -23,11 +27,11 @@ Abre `http://localhost:3000`.
 - Ajustes editables: consumos, km/día y capacidad de batería.
 - Refresco automático programado: diesel a las 07:00 y 14:00, PVPC de mañana a las 20:35 y 21:00 (por si la publicación se retrasa). Además cada endpoint refresca solo si el dato en caché tiene más de 1h.
 
-Los datos se guardan en ficheros JSON dentro de `data/` (no hay base de datos todavía).
+Los datos se guardan en SQLite vía [libSQL](https://turso.tech/libsql): en local usa automáticamente un fichero en `data/app.db` (cero configuración); en producción usa una base de datos Turso gratuita a través de las variables de entorno `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN` (ver `.env.example` y [DEPLOY.md](DEPLOY.md)).
 
 ## Ideas para ampliar
 
-- **Historial y gráficas de ahorro acumulado** a lo largo de meses (ya se guarda `diesel-history.json`; falta lo mismo para electricidad y un gráfico de evolución).
+- **Historial y gráficas de ahorro acumulado** a lo largo de meses (ya se guarda el histórico de precios diesel; falta lo mismo para electricidad y un gráfico de evolución).
 - **Notificación** (push, email o Telegram) avisando cada noche a las 20:35 de la franja más barata para cargar mañana.
 - **Múltiples coches / tarifas**: soportar otra tarifa que no sea PVPC (mercado libre con precio fijo), o comparar con gasolina 95.
 - **Detección automática de sesión de carga** si en el futuro conectas la API de Tesla (Tessie, TeslaMate, etc.) en vez de introducir los datos a mano.
