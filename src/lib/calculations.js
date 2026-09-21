@@ -161,6 +161,90 @@ function evolucionMensual({ registros, historicoPrecios, kmDiaMedio, consumoPor1
   });
 }
 
+/**
+ * Dia de la semana (0=domingo ... 6=sabado) de una fecha "YYYY-MM-DD",
+ * calculado en UTC para que no dependa de la zona horaria del proceso.
+ */
+function diaSemanaUTC(fechaISO) {
+  const [y, m, d] = fechaISO.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * Horas (0-23) en las que se puede cargar en casa ese dia concreto, dada
+ * la ventana real disponible: entre semana solo fuera del horario de
+ * trabajo (desde que llegas a casa hasta que sales al dia siguiente); los
+ * fines de semana no hay restriccion. Al evaluarse por dia individual (no
+ * por "sesion" que cruza la medianoche) no hace falta tratar el cruce de
+ * medianoche como caso especial: cada hora se compara solo con el dia al
+ * que pertenece.
+ */
+function horasPermitidasEnDia(fechaISO, { horaSalidaTrabajo, horaLlegadaCasa }) {
+  const esFinde = [0, 6].includes(diaSemanaUTC(fechaISO));
+  const horas = [];
+  for (let h = 0; h < 24; h++) {
+    const permitida = esFinde || h < horaSalidaTrabajo || h >= horaLlegadaCasa;
+    if (permitida) horas.push(h);
+  }
+  return horas;
+}
+
+/**
+ * Dada una lista de horas disponibles (cada una con su precio), elige las
+ * mas baratas hasta cubrir la energia necesaria, repartiendo como maximo
+ * `potenciaCargaKw` por hora (limite fisico del cargador de casa).
+ */
+function seleccionaHorasMasBaratas(horasDisponibles, energiaNecesariaKwh, potenciaCargaKw) {
+  const ordenadas = [...horasDisponibles].sort((a, b) => a.precioEurKwh - b.precioEurKwh);
+  let restante = energiaNecesariaKwh;
+  let coste = 0;
+  let energiaCubierta = 0;
+  const usadas = [];
+
+  for (const h of ordenadas) {
+    if (restante <= 1e-9) break;
+    const energia = Math.min(restante, potenciaCargaKw);
+    coste += energia * h.precioEurKwh;
+    energiaCubierta += energia;
+    usadas.push({ hora: h.hora, precioEurKwh: h.precioEurKwh, energiaKwh: Number(energia.toFixed(2)) });
+    restante -= energia;
+  }
+
+  usadas.sort((a, b) => a.hora - b.hora);
+
+  return {
+    horasUsadas: usadas,
+    costeTotal: Number(coste.toFixed(2)),
+    energiaCubiertaKwh: Number(energiaCubierta.toFixed(2)),
+    energiaNecesariaKwh: Number(energiaNecesariaKwh.toFixed(2)),
+    coberturaPct: energiaNecesariaKwh > 0 ? Number(((energiaCubierta / energiaNecesariaKwh) * 100).toFixed(0)) : 100,
+    precioMedioEurKwh: energiaCubierta > 0 ? Number((coste / energiaCubierta).toFixed(5)) : null,
+  };
+}
+
+/**
+ * Simulacion retroactiva: para cada dia con precios PVPC guardados, cuanto
+ * habria costado cargar la energia de un dia de conduccion (kmDiaMedio /
+ * consumoKwh100km) usando solo las horas realmente disponibles ese dia.
+ * @param {Array<{fecha, horas:[{hora,precioEurKwh}]}>} dias
+ */
+function simulacionCargaRestringida({ dias, kmDiaMedio, consumoKwh100km, potenciaCargaKw, horaSalidaTrabajo, horaLlegadaCasa }) {
+  const energiaNecesaria = (kmDiaMedio / 100) * consumoKwh100km;
+
+  return dias.map((dia) => {
+    const permitidas = new Set(horasPermitidasEnDia(dia.fecha, { horaSalidaTrabajo, horaLlegadaCasa }));
+    const disponibles = dia.horas.filter((h) => permitidas.has(h.hora));
+    const resultado = seleccionaHorasMasBaratas(disponibles, energiaNecesaria, potenciaCargaKw);
+    const esFinde = [0, 6].includes(diaSemanaUTC(dia.fecha));
+
+    return {
+      fecha: dia.fecha,
+      esFinde,
+      ...resultado,
+    };
+  });
+}
+
 module.exports = {
   costeDiesel,
   costeElectrico,
@@ -169,4 +253,8 @@ module.exports = {
   costeSesionCarga,
   sumaDiasISO,
   evolucionMensual,
+  diaSemanaUTC,
+  horasPermitidasEnDia,
+  seleccionaHorasMasBaratas,
+  simulacionCargaRestringida,
 };

@@ -42,7 +42,9 @@ CREATE TABLE IF NOT EXISTS charges (
   precio_medio_eur_kwh REAL,
   cobertura_datos REAL,
   detalle TEXT NOT NULL,
-  creado_en TEXT NOT NULL
+  creado_en TEXT NOT NULL,
+  tipo TEXT NOT NULL DEFAULT 'casa',
+  proveedor TEXT
 );
 
 CREATE TABLE IF NOT EXISTS diesel_fills (
@@ -63,10 +65,25 @@ CREATE TABLE IF NOT EXISTS electricity_history (
 );
 `;
 
+// Cambios de esquema sobre bases de datos ya existentes (creadas antes de
+// que estas columnas existieran). Cada ALTER va envuelto en su propio
+// try/catch porque SQLite no soporta "ADD COLUMN IF NOT EXISTS": si la
+// columna ya existe, el error se ignora.
+const MIGRACIONES = ["ALTER TABLE charges ADD COLUMN tipo TEXT NOT NULL DEFAULT 'casa'", "ALTER TABLE charges ADD COLUMN proveedor TEXT"];
+
 let ready = null;
 function init() {
   if (!ready) {
-    ready = client.executeMultiple(SCHEMA);
+    ready = (async () => {
+      await client.executeMultiple(SCHEMA);
+      for (const sql of MIGRACIONES) {
+        try {
+          await client.execute(sql);
+        } catch (err) {
+          // columna ya existente: no hay nada que hacer
+        }
+      }
+    })();
   }
   return ready;
 }

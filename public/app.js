@@ -79,11 +79,18 @@ async function cargaResumen() {
   document.getElementById("set-elec-consumo").value = s.electrico.consumoKwh100km;
   document.getElementById("set-elec-capacidad").value = s.electrico.capacidadBateriaKwh;
   document.getElementById("set-elec-km").value = s.electrico.kmDiaMedio;
-  document.getElementById("set-elec-horas").value = s.electrico.horasCargaHabitual;
+  document.getElementById("set-elec-llegada").value = s.electrico.horaLlegadaCasa;
+  document.getElementById("set-elec-salida").value = s.electrico.horaSalidaTrabajo;
+  document.getElementById("set-elec-potencia").value = s.electrico.potenciaCargaKw;
   document.getElementById("set-notif-dias").value = s.notificaciones.avisoStaleDias;
   document.getElementById("set-notif-umbral").value = s.notificaciones.umbralAnomaliaPct;
-  const recDuracion = document.getElementById("rec-duracion");
-  if (!recDuracion.dataset.tocado) recDuracion.value = s.electrico.horasCargaHabitual;
+
+  document.getElementById(
+    "rec-hint"
+  ).textContent = `Solo cuentan las horas en las que realmente podrías cargar en casa (de ${String(s.electrico.horaLlegadaCasa).padStart(2, "0")}:00 a ${String(s.electrico.horaSalidaTrabajo).padStart(2, "0")}:00 entre semana; el fin de semana entero). Te digo cuáles son las más baratas hoy y mañana (disponible desde ~20:30).`;
+
+  const recKwh = document.getElementById("rec-kwh");
+  if (!recKwh.dataset.tocado) recKwh.value = Number(((s.electrico.kmDiaMedio / 100) * s.electrico.consumoKwh100km).toFixed(1));
 }
 
 async function cargaGraficoManana() {
@@ -99,30 +106,29 @@ async function cargaGraficoManana() {
   }
 }
 
-function formatoVentana(v) {
-  if (!v) return "";
-  const inicio = `${String(v.inicio.hora).padStart(2, "0")}:00 (${v.inicio.fecha})`;
-  const fin = `${String((v.fin.hora + 1) % 24).padStart(2, "0")}:00`;
-  return `de ${inicio} a ${fin} · precio medio ${fmtEur3(v.precioMedioEurKwh)}/kWh`;
+function formatoHoras(rec) {
+  if (!rec || rec.horasUsadas.length === 0) return "sin horas disponibles";
+  const horas = rec.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
+  const aviso = rec.coberturaPct < 100 ? ` · ⚠️ solo cubre el ${rec.coberturaPct}% de la energía con las horas permitidas` : "";
+  return `${horas} · ${fmtEur3(rec.precioMedioEurKwh)}/kWh de media · ${fmtEur(rec.costeTotal)} total${aviso}`;
 }
 
-async function recomendar(duracionHoras) {
+async function recomendar(kwh) {
   const resultado = document.getElementById("recomendacion-resultado");
   resultado.innerHTML = "Calculando...";
   try {
-    const data = await api(`/recommend?duracionHoras=${duracionHoras}`);
+    const data = await api(`/recommend?kwh=${kwh}`);
     let html = "";
-    if (data.recomendacionConManana) {
-      html += `<div class="ok">✅ Mejor franja disponible: ${formatoVentana(data.recomendacionConManana)}</div>`;
-    }
-    if (!data.mananaDisponible) {
+    if (data.recomendacionManana) {
+      html += `<div class="ok">✅ Mañana: ${formatoHoras(data.recomendacionManana)}</div>`;
+    } else if (!data.mananaDisponible) {
       html += `<div class="warn">ℹ️ ${data.avisoManana}</div>`;
-      if (data.recomendacionHoy) {
-        html += `<div>Dentro de las horas que quedan hoy: ${formatoVentana(data.recomendacionHoy)}</div>`;
-      }
     }
-    if (!data.recomendacionConManana) {
-      html = `<div class="err">No hay suficientes horas de datos para una ventana de ${duracionHoras}h todavía.</div>`;
+    if (data.recomendacionHoy && data.recomendacionHoy.horasUsadas.length > 0) {
+      html += `<div>Hoy (horas que quedan): ${formatoHoras(data.recomendacionHoy)}</div>`;
+    }
+    if (!html) {
+      html = `<div class="err">No hay horas disponibles todavía dentro de tu ventana de carga.</div>`;
     }
     resultado.innerHTML = html;
   } catch (err) {
@@ -138,11 +144,11 @@ async function cargaTablaCargas() {
     .slice()
     .reverse()
     .forEach((c) => {
+      const tipoTexto = c.tipo === "fuera" ? `Fuera${c.proveedor ? ` (${c.proveedor})` : ""}` : "Casa (PVPC)";
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${c.fecha}</td>
-        <td>${String(c.horaInicio).padStart(2, "0")}:00</td>
-        <td>${c.duracionHoras} h</td>
+        <td>${tipoTexto}</td>
         <td>${c.kwhCargados} kWh</td>
         <td>${fmtEur(c.costeTotal)}</td>
         <td>${c.precioMedioEurKwh != null ? fmtEur3(c.precioMedioEurKwh) : "—"}</td>
@@ -256,26 +262,49 @@ function initFormularios() {
 
   document.getElementById("form-recomendar").addEventListener("submit", (e) => {
     e.preventDefault();
-    const duracion = document.getElementById("rec-duracion").value;
-    recomendar(duracion);
+    recomendar(document.getElementById("rec-kwh").value);
+  });
+  document.getElementById("rec-kwh").addEventListener("input", (e) => {
+    e.target.dataset.tocado = "1";
+  });
+
+  document.querySelectorAll('input[name="carga-tipo"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      const esFuera = document.querySelector('input[name="carga-tipo"]:checked').value === "fuera";
+      document.getElementById("campos-carga-casa").style.display = esFuera ? "none" : "grid";
+      document.getElementById("campos-carga-fuera").style.display = esFuera ? "grid" : "none";
+    });
   });
 
   document.getElementById("form-carga").addEventListener("submit", async (e) => {
     e.preventDefault();
     const resultado = document.getElementById("carga-resultado");
+    const tipo = document.querySelector('input[name="carga-tipo"]:checked').value;
+
     const body = {
       fecha: document.getElementById("carga-fecha").value,
-      horaInicio: Number(document.getElementById("carga-hora").value),
-      duracionHoras: Number(document.getElementById("carga-duracion").value),
+      tipo,
       bateriaAntesPct: document.getElementById("carga-bat-antes").value || null,
       bateriaDespuesPct: document.getElementById("carga-bat-despues").value || null,
       kwhCargados: document.getElementById("carga-kwh").value || null,
     };
+
+    if (tipo === "fuera") {
+      body.proveedor = document.getElementById("carga-proveedor").value || null;
+      body.precioMedioEurKwh = document.getElementById("carga-precio-manual").value || null;
+      body.costeTotal = document.getElementById("carga-total-manual").value || null;
+    } else {
+      body.horaInicio = Number(document.getElementById("carga-hora").value);
+      body.duracionHoras = Number(document.getElementById("carga-duracion").value);
+    }
+
     try {
       const registro = await api("/charges", { method: "POST", body: JSON.stringify(body) });
-      resultado.innerHTML = `<div class="ok">Guardado: ${registro.kwhCargados} kWh · coste ${fmtEur(registro.costeTotal)} (cobertura de datos: ${registro.coberturaDatos}%)</div>`;
+      resultado.innerHTML = `<div class="ok">Guardado: ${registro.kwhCargados} kWh · coste ${fmtEur(registro.costeTotal)}${registro.coberturaDatos != null ? ` (cobertura de datos: ${registro.coberturaDatos}%)` : ""}</div>`;
       e.target.reset();
       document.getElementById("carga-fecha").value = new Date().toISOString().slice(0, 10);
+      document.getElementById("campos-carga-casa").style.display = "grid";
+      document.getElementById("campos-carga-fuera").style.display = "none";
       cargaTablaCargas();
     } catch (err) {
       resultado.innerHTML = `<div class="err">${err.message}</div>`;
@@ -305,10 +334,6 @@ function initFormularios() {
     }
   });
 
-  document.getElementById("rec-duracion").addEventListener("input", (e) => {
-    e.target.dataset.tocado = "1";
-  });
-
   document.getElementById("form-ajustes").addEventListener("submit", async (e) => {
     e.preventDefault();
     await api("/settings", {
@@ -322,7 +347,9 @@ function initFormularios() {
           consumoKwh100km: Number(document.getElementById("set-elec-consumo").value),
           capacidadBateriaKwh: Number(document.getElementById("set-elec-capacidad").value),
           kmDiaMedio: Number(document.getElementById("set-elec-km").value),
-          horasCargaHabitual: Number(document.getElementById("set-elec-horas").value),
+          horaLlegadaCasa: Number(document.getElementById("set-elec-llegada").value),
+          horaSalidaTrabajo: Number(document.getElementById("set-elec-salida").value),
+          potenciaCargaKw: Number(document.getElementById("set-elec-potencia").value),
         },
         notificaciones: {
           avisoStaleDias: Number(document.getElementById("set-notif-dias").value),
@@ -364,8 +391,8 @@ function initFormularios() {
     descargaCSV(
       "cargas-electrico.csv",
       charges,
-      ["fecha", "horaInicio", "duracionHoras", "kwhCargados", "costeTotal", "precioMedioEurKwh"],
-      ["Fecha", "Hora inicio", "Duración (h)", "kWh", "Coste total", "€/kWh medio"]
+      ["fecha", "tipo", "proveedor", "horaInicio", "duracionHoras", "kwhCargados", "costeTotal", "precioMedioEurKwh"],
+      ["Fecha", "Tipo", "Proveedor", "Hora inicio", "Duración (h)", "kWh", "Coste total", "€/kWh medio"]
     );
   });
 }
@@ -433,6 +460,43 @@ async function cargaEvolucion() {
   }
 }
 
+const DIAS_SEMANA_CORTO = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+async function cargaSimulacion() {
+  try {
+    const data = await api("/electricity/simulation");
+
+    document.getElementById("stats-simulacion").innerHTML = `
+      <div class="stat-box"><span>Días simulados</span><strong>${data.totalDias}</strong></div>
+      <div class="stat-box"><span>Coste simulado total</span><strong>${fmtEur(data.totalCoste)}</strong></div>
+      <div class="stat-box"><span>Media por día</span><strong>${fmtEur(data.costeMedioDia)}</strong></div>
+      <div class="stat-box"><span>Diésel real en el mismo periodo</span><strong>${data.gastoDieselMismoPeriodo != null ? fmtEur(data.gastoDieselMismoPeriodo) : "— (sin repostajes en ese rango)"}</strong></div>
+    `;
+
+    const tbody = document.querySelector("#tabla-simulacion tbody");
+    tbody.innerHTML = "";
+    data.dias
+      .slice()
+      .reverse()
+      .forEach((d) => {
+        const diaSemana = DIAS_SEMANA_CORTO[new Date(d.fecha + "T00:00:00Z").getUTCDay()];
+        const horas = d.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${d.fecha}</td>
+          <td>${diaSemana}${d.esFinde ? " 🏖️" : ""}</td>
+          <td>${d.energiaNecesariaKwh} kWh</td>
+          <td>${fmtEur(d.costeTotal)}</td>
+          <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
+          <td>${horas || "—"}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+  } catch (err) {
+    document.getElementById("stats-simulacion").innerHTML = `<div class="stat-box"><span>Simulación</span><strong>Aún sin datos suficientes</strong></div>`;
+  }
+}
+
 async function cargaEstadoNotificaciones() {
   const el = document.getElementById("notify-status");
   try {
@@ -458,3 +522,4 @@ cargaTablaCargas();
 cargaTablaRepostajes();
 cargaEvolucion();
 cargaEstadoNotificaciones();
+cargaSimulacion();

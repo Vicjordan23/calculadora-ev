@@ -3,7 +3,6 @@ const store = require("../lib/store");
 const { fetchDieselPrice } = require("../fetchers/diesel");
 const { fetchElectricityPrices, toDateParam } = require("../fetchers/electricity");
 const calc = require("../lib/calculations");
-const { mejorVentana, construyeSerie } = require("../lib/recommend");
 const { sendTelegramMessage, telegramConfigurado } = require("../lib/telegram");
 
 const router = express.Router();
@@ -161,11 +160,22 @@ router.get("/charges", async (req, res) => {
 
 router.post("/charges", async (req, res) => {
   try {
-    const { fecha, horaInicio, duracionHoras, bateriaAntesPct, bateriaDespuesPct, kwhCargados } = req.body;
+    const {
+      fecha,
+      horaInicio,
+      duracionHoras,
+      bateriaAntesPct,
+      bateriaDespuesPct,
+      kwhCargados,
+      tipo,
+      proveedor,
+      precioMedioEurKwh,
+      costeTotal,
+    } = req.body;
     const settings = await store.getSettings();
 
-    if (!fecha || horaInicio == null || !duracionHoras) {
-      return res.status(400).json({ error: "Faltan campos: fecha, horaInicio, duracionHoras" });
+    if (!fecha) {
+      return res.status(400).json({ error: "Falta el campo fecha" });
     }
 
     const kwh =
@@ -175,6 +185,38 @@ router.post("/charges", async (req, res) => {
 
     if (!(kwh > 0)) {
       return res.status(400).json({ error: "La energia cargada debe ser mayor que 0 (revisa % de bateria o kWh)." });
+    }
+
+    if (tipo === "fuera") {
+      // Carga fuera de casa (Supercharger u otra compañia): precio manual,
+      // no se calcula con el PVPC de casa.
+      let precio = precioMedioEurKwh != null ? Number(precioMedioEurKwh) : null;
+      let total = costeTotal != null ? Number(costeTotal) : null;
+      if (precio == null && total != null) precio = total / kwh;
+      else if (total == null && precio != null) total = precio * kwh;
+
+      if (!(precio > 0) || !(total > 0)) {
+        return res.status(400).json({ error: "Indica el precio por kWh o el coste total de la carga fuera de casa" });
+      }
+
+      const registro = await store.addCharge({
+        fecha,
+        bateriaAntesPct: bateriaAntesPct != null ? Number(bateriaAntesPct) : null,
+        bateriaDespuesPct: bateriaDespuesPct != null ? Number(bateriaDespuesPct) : null,
+        kwhCargados: Number(kwh.toFixed(2)),
+        costeTotal: Number(total.toFixed(2)),
+        precioMedioEurKwh: Number(precio.toFixed(5)),
+        coberturaDatos: 100,
+        detalle: [],
+        tipo: "fuera",
+        proveedor: proveedor || null,
+      });
+
+      return res.status(201).json(registro);
+    }
+
+    if (horaInicio == null || !duracionHoras) {
+      return res.status(400).json({ error: "Faltan campos: horaInicio, duracionHoras" });
     }
 
     const fechasNecesarias = new Set();
@@ -211,6 +253,7 @@ router.post("/charges", async (req, res) => {
       precioMedioEurKwh: resultado.precioMedioEurKwh,
       coberturaDatos: resultado.coberturaDatos,
       detalle: resultado.detalle,
+      tipo: "casa",
     });
 
     res.status(201).json(registro);
@@ -310,36 +353,104 @@ router.get("/electricity/evolution", async (req, res) => {
 });
 
 // ---------- Recomendacion de horario de carga ----------
+// Respeta la ventana real en la que se puede cargar en casa (ver ajustes:
+// horaSalidaTrabajo / horaLlegadaCasa entre semana, fin de semana libre).
+// En vez de buscar un bloque continuo de N horas, elige las horas sueltas
+// mas baratas disponibles hasta cubrir la energia necesaria (asi es como
+// funciona en la practica la carga programada de un coche electrico).
 
-async function calcularRecomendacion(duracionHoras) {
+async function calcularRecomendacion(kwh) {
+  const settings = await store.getSettings();
+  const ventana = { horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo, horaLlegadaCasa: settings.electrico.horaLlegadaCasa };
+  const potenciaCargaKw = settings.electrico.potenciaCargaKw;
+
   const hoy = fechaISO(0);
   const manana = fechaISO(1);
+  const horaActual = new Date().getHours();
 
   const [precioHoy, precioManana] = await Promise.all([
     obtenerPreciosDia(hoy).catch(() => null),
     obtenerPreciosDia(manana).catch(() => null),
   ]);
 
-  const serieHoy = precioHoy ? construyeSerie([precioHoy]) : [];
-  const serieCompleta = construyeSerie([precioHoy, precioManana].filter(Boolean));
+  function recomendacionParaDia(diaPrecios, soloHorasFuturas) {
+    if (!diaPrecios) return null;
+    const permitidas = new Set(calc.horasPermitidasEnDia(diaPrecios.fecha, ventana));
+    const disponibles = diaPrecios.horas.filter((h) => permitidas.has(h.hora) && (!soloHorasFuturas || h.hora > horaActual));
+    return { fecha: diaPrecios.fecha, ...calc.seleccionaHorasMasBaratas(disponibles, kwh, potenciaCargaKw) };
+  }
 
   return {
+    kwh,
+    ventana,
+    potenciaCargaKw,
     mananaDisponible: !!precioManana,
     avisoManana: precioManana
       ? null
       : "Los precios de manana se publican sobre las 20:30. Hasta entonces solo se puede recomendar dentro de las horas de hoy que queden.",
-    recomendacionHoy: mejorVentana(serieHoy, duracionHoras),
-    recomendacionConManana: mejorVentana(serieCompleta, duracionHoras),
+    recomendacionHoy: recomendacionParaDia(precioHoy, true),
+    recomendacionManana: recomendacionParaDia(precioManana, false),
   };
 }
 
 router.get("/recommend", async (req, res) => {
   try {
-    const duracionHoras = Number(req.query.duracionHoras);
-    if (!(duracionHoras > 0)) {
-      return res.status(400).json({ error: "Parametro duracionHoras invalido" });
+    let kwh = Number(req.query.kwh);
+    if (!(kwh > 0)) {
+      const settings = await store.getSettings();
+      kwh = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
     }
-    res.json(await calcularRecomendacion(duracionHoras));
+    res.json(await calcularRecomendacion(kwh));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- Simulacion retroactiva de carga en casa ----------
+// "Si hubiera tenido el electrico, cuanto me habria costado cargar cada dia
+// respetando la ventana real disponible", usando los precios PVPC reales
+// que ya tenemos guardados dia a dia. Se compara con el gasto real de
+// diesel en ese mismo rango de fechas.
+
+router.get("/electricity/simulation", async (req, res) => {
+  try {
+    const [cacheAll, settings, fills] = await Promise.all([
+      store.getElectricityCacheAll(),
+      store.getSettings(),
+      store.getDieselFills(),
+    ]);
+
+    const dias = calc.simulacionCargaRestringida({
+      dias: cacheAll,
+      kmDiaMedio: settings.electrico.kmDiaMedio,
+      consumoKwh100km: settings.electrico.consumoKwh100km,
+      potenciaCargaKw: settings.electrico.potenciaCargaKw,
+      horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo,
+      horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
+    });
+
+    const totalCoste = dias.reduce((a, d) => a + d.costeTotal, 0);
+    const totalDias = dias.length;
+
+    let gastoDieselMismoPeriodo = null;
+    if (totalDias > 0) {
+      const desde = dias[0].fecha;
+      const hasta = dias[dias.length - 1].fecha;
+      gastoDieselMismoPeriodo = fills.filter((f) => f.fecha >= desde && f.fecha <= hasta).reduce((a, f) => a + f.costeTotal, 0);
+    }
+
+    res.json({
+      dias,
+      totalCoste: Number(totalCoste.toFixed(2)),
+      totalDias,
+      costeMedioDia: totalDias ? Number((totalCoste / totalDias).toFixed(2)) : null,
+      gastoDieselMismoPeriodo: gastoDieselMismoPeriodo != null ? Number(gastoDieselMismoPeriodo.toFixed(2)) : null,
+      ventana: {
+        horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo,
+        horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
+        potenciaCargaKw: settings.electrico.potenciaCargaKw,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -368,17 +479,16 @@ router.post("/notify/test", async (req, res) => {
 router.post("/notify/nightly", async (req, res) => {
   try {
     const settings = await store.getSettings();
-    const duracionHoras = Number(req.query.duracionHoras) || settings.electrico.horasCargaHabitual || 4;
+    const kwh = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
 
     const lineas = [];
 
-    const recomendacion = await calcularRecomendacion(duracionHoras);
-    const ventana = recomendacion.recomendacionConManana;
-    if (ventana) {
-      const inicio = `${String(ventana.inicio.hora).padStart(2, "0")}:00`;
-      const fin = `${String((ventana.fin.hora + 1) % 24).padStart(2, "0")}:00`;
+    const recomendacion = await calcularRecomendacion(kwh);
+    const rec = recomendacion.recomendacionManana;
+    if (rec && rec.horasUsadas.length > 0) {
+      const horas = rec.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
       lineas.push(
-        `🔌 Mejor franja para cargar ${duracionHoras}h: <b>${inicio}–${fin}</b> (${ventana.inicio.fecha}) · ${ventana.precioMedioEurKwh.toFixed(4)} €/kWh de media`
+        `🔌 Mejores horas para cargar mañana (${kwh.toFixed(1)} kWh): <b>${horas}</b> · ${rec.precioMedioEurKwh.toFixed(4)} €/kWh de media · ${rec.costeTotal.toFixed(2)} €`
       );
     } else if (!recomendacion.mananaDisponible) {
       lineas.push("🔌 Los precios de mañana aún no están publicados (normalmente sobre las 20:30).");

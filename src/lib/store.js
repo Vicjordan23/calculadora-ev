@@ -10,7 +10,13 @@ const DEFAULT_SETTINGS = {
     consumoKwh100km: 15,
     capacidadBateriaKwh: 62.5,
     kmDiaMedio: 80,
-    horasCargaHabitual: 4,
+    // Ventana real en la que puedes cargar en casa: entre semana solo puedes
+    // cargar fuera de tu horario de trabajo (llegas a horaLlegadaCasa, sales
+    // a horaSalidaTrabajo al dia siguiente); los fines de semana no aplica
+    // ninguna restriccion.
+    horaSalidaTrabajo: 8,
+    horaLlegadaCasa: 19,
+    potenciaCargaKw: 7.4,
   },
   notificaciones: {
     avisoStaleDias: 10,
@@ -107,6 +113,15 @@ async function getElectricityHistory() {
   return res.rows.map((r) => ({ fecha: r.fecha, precioMedioEurKwh: r.precioMedioEurKwh }));
 }
 
+// Devuelve el desglose horario completo (no solo la media) de todos los
+// dias que tenemos guardados, para poder simular retroactivamente que
+// habria costado cargar respetando la ventana horaria real disponible.
+async function getElectricityCacheAll() {
+  await init();
+  const res = await client.execute("SELECT fecha, payload FROM electricity_cache ORDER BY fecha ASC");
+  return res.rows.map((r) => JSON.parse(r.payload));
+}
+
 async function getCharges() {
   await init();
   const res = await client.execute("SELECT * FROM charges ORDER BY creado_en ASC");
@@ -126,30 +141,34 @@ function rowToCharge(r) {
     precioMedioEurKwh: r.precio_medio_eur_kwh,
     coberturaDatos: r.cobertura_datos,
     detalle: JSON.parse(r.detalle),
+    tipo: r.tipo || "casa",
+    proveedor: r.proveedor,
   };
 }
 
 async function addCharge(charge) {
   await init();
-  const id = Date.now().toString(36);
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const creadoEn = new Date().toISOString();
   await client.execute({
     sql: `INSERT INTO charges
-      (id, fecha, hora_inicio, duracion_horas, bateria_antes_pct, bateria_despues_pct, kwh_cargados, coste_total, precio_medio_eur_kwh, cobertura_datos, detalle, creado_en)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, fecha, hora_inicio, duracion_horas, bateria_antes_pct, bateria_despues_pct, kwh_cargados, coste_total, precio_medio_eur_kwh, cobertura_datos, detalle, creado_en, tipo, proveedor)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       id,
       charge.fecha,
-      charge.horaInicio,
-      charge.duracionHoras,
+      charge.horaInicio ?? 0,
+      charge.duracionHoras ?? 0,
       charge.bateriaAntesPct,
       charge.bateriaDespuesPct,
       charge.kwhCargados,
       charge.costeTotal,
       charge.precioMedioEurKwh,
       charge.coberturaDatos,
-      JSON.stringify(charge.detalle),
+      JSON.stringify(charge.detalle || []),
       creadoEn,
+      charge.tipo || "casa",
+      charge.proveedor ?? null,
     ],
   });
   return { id, ...charge };
@@ -218,6 +237,7 @@ module.exports = {
   getElectricityForDate,
   saveElectricityPrices,
   getElectricityHistory,
+  getElectricityCacheAll,
   getCharges,
   addCharge,
   deleteCharge,
