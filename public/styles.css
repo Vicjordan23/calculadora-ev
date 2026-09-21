@@ -1,0 +1,166 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --border: #2a2f3a;
+  --text: #e8eaed;
+  --text-dim: #9aa1ac;
+  --diesel: #e0a24a;
+  --electrico: #4ac0e0;
+  --ahorro: #4ae08c;
+  --accent: #6d8dff;
+  --danger: #e05a5a;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.app-header {
+  padding: 28px 24px 8px;
+  text-align: center;
+}
+.app-header h1 { margin: 0 0 4px; font-size: 1.6rem; }
+.subtitle { color: var(--text-dim); margin: 0; font-size: 0.95rem; }
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px 20px 60px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+.card h2 { margin: 0 0 6px; font-size: 1rem; color: var(--text-dim); font-weight: 600; }
+.card .price { font-size: 2rem; font-weight: 700; margin-top: 4px; }
+.card.diesel .price { color: var(--diesel); }
+.card.electrico .price { color: var(--electrico); }
+.card.ahorro .price { color: var(--ahorro); }
+.price-label { color: var(--text-dim); font-size: 0.8rem; margin-bottom: 10px; }
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.stat-row span { color: var(--text-dim); }
+
+.fetch-meta { color: var(--text-dim); font-size: 0.72rem; margin-top: 8px; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  margin: 18px 0;
+}
+.panel h2 { margin-top: 0; font-size: 1.1rem; }
+.hint { color: var(--text-dim); font-size: 0.88rem; margin-top: -6px; }
+
+.btn-primary, .btn-secondary {
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); margin-top: 10px; }
+.btn-secondary:hover { background: var(--border); }
+
+.inline-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.grid-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+.grid-form fieldset {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px 16px;
+}
+.grid-form legend { color: var(--text-dim); padding: 0 6px; font-size: 0.85rem; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.recomendacion {
+  margin-top: 14px;
+  font-size: 0.92rem;
+}
+.recomendacion .ok { color: var(--ahorro); font-weight: 600; }
+.recomendacion .warn { color: var(--diesel); }
+.recomendacion .err { color: var(--danger); }
+
+.tabla-cargas {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 18px;
+  font-size: 0.88rem;
+}
+.tabla-cargas th, .tabla-cargas td {
+  text-align: left;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.tabla-cargas th { color: var(--text-dim); font-weight: 600; }
+.tabla-cargas button {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+footer {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  margin-top: 30px;
+}
+
+@media (max-width: 600px) {
+  .card .price { font-size: 1.6rem; }
+}
