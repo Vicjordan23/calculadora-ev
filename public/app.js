@@ -146,7 +146,17 @@ async function recomendar(bateriaActualPct) {
 
     let html = "";
     if (!data.mananaDisponible) {
-      html += `<div class="recomendacion"><div class="warn">ℹ️ ${data.avisoManana}</div></div>`;
+      html += `<div class="recomendacion"><div class="warn">⚠️ <strong>Provisional hasta las 20:30.</strong> ${data.avisoManana}</div></div>`;
+    }
+
+    if (data.tipEsperarFinde) {
+      const t = data.tipEsperarFinde;
+      html += `<div class="recomendacion tip-finde">
+        🗓️ <strong>Probablemente te compense esperar al fin de semana.</strong>
+        Los últimos ${t.muestras} sábados/domingos han costado de media ${fmtEur3(t.precioEstimadoFinde)}/kWh,
+        frente a ${fmtEur3(t.precioActual)}/kWh ahora. Con tu batería actual aguantas ~${t.diasAutonomia} día(s) sin cargar,
+        y solo faltan ${t.diasHastaSabado} para el sábado — no haría falta cargar nada hasta entonces.
+      </div>`;
     }
 
     html += `<div class="plan-opciones">

@@ -466,6 +466,12 @@ router.get("/recommend", async (req, res) => {
       recomendacion = compensa ? "completa" : "solo-necesario";
     }
 
+    // Consejo "espera al fin de semana": si con la bateria actual aguantas
+    // sin cargar hasta el proximo sabado/domingo, y el histórico dice que
+    // los findes suelen salir bastante mas baratos, avisa de que compensa
+    // esperar en vez de cargar ahora entre semana.
+    const tipEsperarFinde = await calculaTipEsperarFinde({ bateriaActualKwh, kwhDiaMedio, opcionSoloNecesario });
+
     res.json({
       kwhDiaMedio: Number(kwhDiaMedio.toFixed(2)),
       potenciaCargaKw,
@@ -473,16 +479,52 @@ router.get("/recommend", async (req, res) => {
       bateriaActualPct,
       capacidadBateriaKwh,
       mananaDisponible,
-      avisoManana: mananaDisponible ? null : "Los precios de mañana se publican sobre las 20:30. Hasta entonces se usan las horas que quedan hoy.",
+      avisoManana: mananaDisponible
+        ? null
+        : "Antes de las 20:30 esto es solo orientativo: todavía no se conocen los precios de mañana, así que solo se puede elegir entre las horas que quedan hoy (que suelen ser las más caras del día). Después de las 20:30 la recomendación ya compara hoy y mañana de verdad.",
       opcionSoloNecesario,
       opcionCargaCompleta,
       diasQueCubre,
       recomendacion,
+      tipEsperarFinde,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+async function calculaTipEsperarFinde({ bateriaActualKwh, kwhDiaMedio, opcionSoloNecesario }) {
+  const hoyFecha = fechaISO(0);
+  const diaSemanaHoy = calc.diaSemanaUTC(hoyFecha);
+  const esFindeHoy = diaSemanaHoy === 0 || diaSemanaHoy === 6;
+  if (esFindeHoy || kwhDiaMedio <= 0 || opcionSoloNecesario.precioMedioEurKwh == null) return null;
+
+  const diasHastaSabado = 6 - diaSemanaHoy; // diaSemanaHoy es 1-5 (lun-vie) aqui
+  const historial = await store.getElectricityHistory();
+  const historicoPrecios = historial.map((h) => ({ fecha: h.fecha, precio: h.precioMedioEurKwh }));
+
+  const precioSabado = calc.precioHistoricoPorDiaSemana(historicoPrecios, 6, 4);
+  const precioDomingo = calc.precioHistoricoPorDiaSemana(historicoPrecios, 0, 4);
+  const muestras = [precioSabado, precioDomingo].filter(Boolean);
+  if (muestras.length === 0) return null; // aun no hay suficiente historico de findes
+
+  const precioEstimadoFinde = muestras.reduce((a, m) => a + m.precioMedioEurKwh, 0) / muestras.length;
+  const totalMuestras = muestras.reduce((a, m) => a + m.muestras, 0);
+
+  const diasAutonomia = Math.floor(bateriaActualKwh / kwhDiaMedio);
+  const puedeEsperar = diasAutonomia >= diasHastaSabado;
+  const compensaEsperar = precioEstimadoFinde < opcionSoloNecesario.precioMedioEurKwh * 0.85; // al menos 15% mas barato
+
+  if (!puedeEsperar || !compensaEsperar) return null;
+
+  return {
+    diasHastaSabado,
+    diasAutonomia,
+    precioEstimadoFinde: Number(precioEstimadoFinde.toFixed(5)),
+    precioActual: opcionSoloNecesario.precioMedioEurKwh,
+    muestras: totalMuestras,
+  };
+}
 
 // ---------- Simulacion retroactiva de carga en casa ----------
 // "Si hubiera tenido el electrico, cuanto me habria costado cargar cada dia

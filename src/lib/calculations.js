@@ -230,6 +230,23 @@ function simulacionCargaRestringida({ dias, kmDiaMedio, consumoKwh100km, potenci
 }
 
 /**
+ * Precio medio historico de un dia de la semana concreto (0=domingo,
+ * 6=sabado), usando las ultimas `n` muestras de ese dia de la semana que
+ * tengamos guardadas. Sirve para estimar "cuanto suele costar el sabado"
+ * aunque todavia no tengamos el precio real de ese sabado en concreto.
+ * @param {Array<{fecha, precio}>} historicoPrecios precio medio diario
+ */
+function precioHistoricoPorDiaSemana(historicoPrecios, diaSemana, n = 4) {
+  const delDia = historicoPrecios
+    .filter((h) => diaSemanaUTC(h.fecha) === diaSemana)
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+    .slice(0, n);
+  if (delDia.length === 0) return null;
+  const media = delDia.reduce((a, h) => a + h.precio, 0) / delDia.length;
+  return { precioMedioEurKwh: Number(media.toFixed(5)), muestras: delDia.length };
+}
+
+/**
  * Agrupa una lista de horas sueltas (ya ordenadas cronologicamente, como
  * devuelve seleccionaHorasMasBaratas) en bloques continuos de "enchufa
  * desde las X hasta las Y", que es como se usa un cargador de verdad (una
@@ -260,6 +277,7 @@ module.exports = {
   evolucionMensual,
   diaSemanaUTC,
   horasPermitidasEnDia,
+  precioHistoricoPorDiaSemana,
   agrupaBloques,
   seleccionaHorasMasBaratas,
   simulacionCargaRestringida,
