@@ -40,8 +40,9 @@
     <div class="card electrico">
       <h2>Eléctrico (PVPC)</h2>
       <div class="price" id="elec-precio">—</div>
-      <div class="price-label">€/kWh medio de hoy</div>
+      <div class="price-label">€/kWh real cargando en las horas más baratas de hoy</div>
       <div class="stat-row"><span>kWh/dia</span><strong id="elec-kwh">—</strong></div>
+      <div class="stat-row"><span>Horas de carga necesarias</span><strong id="elec-horas">—</strong></div>
       <div class="stat-row"><span>Coste/dia</span><strong id="elec-dia">—</strong></div>
       <div class="stat-row"><span>Coste/mes</span><strong id="elec-mes">—</strong></div>
       <div class="stat-row"><span>Coste/año</span><strong id="elec-anio">—</strong></div>
@@ -120,15 +121,15 @@
   </section>
 
   <section class="panel">
-    <h2>¿Cuándo cargar?</h2>
-    <p class="hint" id="rec-hint">Solo cuentan las horas en las que realmente podrías estar cargando en casa (fuera de tu horario de trabajo entre semana; el fin de semana entero). Te digo cuáles son las más baratas hoy y mañana (disponible desde ~20:30).</p>
+    <h2>🔌 Planificador de carga</h2>
+    <p class="hint" id="rec-hint">Solo cuentan las horas en las que realmente podrías estar cargando en casa (fuera de tu horario de trabajo entre semana; el fin de semana entero), repartiendo la energía a la potencia real de tu cargador — nunca se carga todo en una hora.</p>
     <form id="form-recomendar" class="inline-form">
-      <label>kWh a cargar
-        <input type="number" id="rec-kwh" min="0.5" step="0.5" required />
+      <label>Batería actual (%)
+        <input type="number" id="rec-bateria" min="0" max="100" step="1" value="30" />
       </label>
-      <button type="submit" class="btn-primary">Recomendar horas</button>
+      <button type="submit" class="btn-primary">Calcular plan</button>
     </form>
-    <div id="recomendacion-resultado" class="recomendacion"></div>
+    <div id="recomendacion-resultado"></div>
   </section>
 
   <section class="panel">

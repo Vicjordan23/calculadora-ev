@@ -119,14 +119,29 @@ router.get("/summary", async (req, res) => {
         })
       : null;
 
-    const precioMedioElectricidad = electricidadHoy ? calc.mediaPrecios(electricidadHoy.horas) : null;
-    const resumenElectrico = precioMedioElectricidad
-      ? calc.costeElectrico({
-          kmDiaMedio: settings.electrico.kmDiaMedio,
-          consumoKwh100km: settings.electrico.consumoKwh100km,
-          precioMedioEurKwh: precioMedioElectricidad,
-        })
-      : null;
+    // Coste real "de verdad": no la media plana de las 24h, sino lo que
+    // costaria cargar la energia de un dia usando SOLO las horas en las que
+    // realmente puedes cargar en casa, repartida a la potencia real del
+    // cargador (nunca se carga todo en una hora).
+    const kwhDiaMedio = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
+    let resumenElectrico = null;
+    if (electricidadHoy) {
+      const ventana = { horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo, horaLlegadaCasa: settings.electrico.horaLlegadaCasa };
+      const permitidasHoy = new Set(calc.horasPermitidasEnDia(electricidadHoy.fecha, ventana));
+      const disponiblesHoy = electricidadHoy.horas.filter((h) => permitidasHoy.has(h.hora));
+      const cargaHoy = calc.seleccionaHorasMasBaratas(disponiblesHoy, kwhDiaMedio, settings.electrico.potenciaCargaKw);
+      if (cargaHoy.energiaCubiertaKwh > 0) {
+        resumenElectrico = {
+          kwhDia: Number(kwhDiaMedio.toFixed(2)),
+          costeDia: cargaHoy.costeTotal,
+          costeMes: Number((cargaHoy.costeTotal * 30).toFixed(2)),
+          costeAnio: Number((cargaHoy.costeTotal * 365).toFixed(2)),
+          costePorKm: Number((cargaHoy.costeTotal / settings.electrico.kmDiaMedio).toFixed(4)),
+          precioMedioEurKwh: cargaHoy.precioMedioEurKwh,
+          horasNecesarias: cargaHoy.horasNecesarias,
+        };
+      }
+    }
 
     const ahorro =
       resumenDiesel && resumenElectrico
@@ -141,7 +156,7 @@ router.get("/summary", async (req, res) => {
       settings,
       diesel,
       electricidadHoy: electricidadHoy
-        ? { fecha: electricidadHoy.fecha, precioMedioEurKwh: Number(precioMedioElectricidad.toFixed(5)), horas: electricidadHoy.horas }
+        ? { fecha: electricidadHoy.fecha, precioMedioEurKwh: resumenElectrico?.precioMedioEurKwh ?? null, horas: electricidadHoy.horas }
         : null,
       resumenDiesel,
       resumenElectrico,
@@ -352,18 +367,19 @@ router.get("/electricity/evolution", async (req, res) => {
   }
 });
 
-// ---------- Recomendacion de horario de carga ----------
-// Respeta la ventana real en la que se puede cargar en casa (ver ajustes:
-// horaSalidaTrabajo / horaLlegadaCasa entre semana, fin de semana libre).
-// En vez de buscar un bloque continuo de N horas, elige las horas sueltas
-// mas baratas disponibles hasta cubrir la energia necesaria (asi es como
-// funciona en la practica la carga programada de un coche electrico).
+// ---------- Plan de carga: cuanto y cuando cargar ----------
+// Respeta la ventana real en la que se puede cargar en casa (ajustes:
+// horaSalidaTrabajo / horaLlegadaCasa entre semana, fin de semana libre) y
+// la potencia real del cargador (nunca se carga toda la energia en una
+// sola hora: a 3kW, 9kWh son 3 horas, no una). Compara dos estrategias con
+// los precios reales de hoy y manana, que son los unicos que conocemos:
+//   A) "opcionSoloNecesario": cargar justo la energia de un dia de conduccion.
+//   B) "opcionCargaCompleta": aprovechar ahora (hoy+manana) las horas mas
+//      baratas para cargar hasta el 100% de la bateria (partiendo de tu %
+//      actual), si eso sale mas barato por kWh y cubre varios dias -- la
+//      logica de "cargar el fin de semana para toda la semana".
 
-async function calcularRecomendacion(kwh) {
-  const settings = await store.getSettings();
-  const ventana = { horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo, horaLlegadaCasa: settings.electrico.horaLlegadaCasa };
-  const potenciaCargaKw = settings.electrico.potenciaCargaKw;
-
+async function calculaHorasCandidatas({ ventana, potenciaCargaKw }) {
   const hoy = fechaISO(0);
   const manana = fechaISO(1);
   const horaActual = new Date().getHours();
@@ -373,34 +389,75 @@ async function calcularRecomendacion(kwh) {
     obtenerPreciosDia(manana).catch(() => null),
   ]);
 
-  function recomendacionParaDia(diaPrecios, soloHorasFuturas) {
-    if (!diaPrecios) return null;
-    const permitidas = new Set(calc.horasPermitidasEnDia(diaPrecios.fecha, ventana));
-    const disponibles = diaPrecios.horas.filter((h) => permitidas.has(h.hora) && (!soloHorasFuturas || h.hora > horaActual));
-    return { fecha: diaPrecios.fecha, ...calc.seleccionaHorasMasBaratas(disponibles, kwh, potenciaCargaKw) };
-  }
+  const disponiblesHoy = precioHoy
+    ? (() => {
+        const permitidas = new Set(calc.horasPermitidasEnDia(hoy, ventana));
+        return precioHoy.horas
+          .filter((h) => permitidas.has(h.hora) && h.hora > horaActual)
+          .map((h) => ({ fecha: hoy, hora: h.hora, precioEurKwh: h.precioEurKwh }));
+      })()
+    : [];
 
-  return {
-    kwh,
-    ventana,
-    potenciaCargaKw,
-    mananaDisponible: !!precioManana,
-    avisoManana: precioManana
-      ? null
-      : "Los precios de manana se publican sobre las 20:30. Hasta entonces solo se puede recomendar dentro de las horas de hoy que queden.",
-    recomendacionHoy: recomendacionParaDia(precioHoy, true),
-    recomendacionManana: recomendacionParaDia(precioManana, false),
-  };
+  const disponiblesManana = precioManana
+    ? (() => {
+        const permitidas = new Set(calc.horasPermitidasEnDia(manana, ventana));
+        return precioManana.horas.filter((h) => permitidas.has(h.hora)).map((h) => ({ fecha: manana, hora: h.hora, precioEurKwh: h.precioEurKwh }));
+      })()
+    : [];
+
+  return { mananaDisponible: !!precioManana, disponiblesHoy, disponiblesManana };
 }
 
 router.get("/recommend", async (req, res) => {
   try {
-    let kwh = Number(req.query.kwh);
-    if (!(kwh > 0)) {
-      const settings = await store.getSettings();
-      kwh = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
+    const settings = await store.getSettings();
+    const ventana = { horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo, horaLlegadaCasa: settings.electrico.horaLlegadaCasa };
+    const potenciaCargaKw = settings.electrico.potenciaCargaKw;
+    const capacidadBateriaKwh = settings.electrico.capacidadBateriaKwh;
+    const kwhDiaMedio = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
+
+    const bateriaActualPct = req.query.bateriaActualPct != null && req.query.bateriaActualPct !== "" ? Number(req.query.bateriaActualPct) : 30;
+
+    const { mananaDisponible, disponiblesHoy, disponiblesManana } = await calculaHorasCandidatas({ ventana, potenciaCargaKw });
+
+    // A) Solo lo necesario para el dia siguiente: usa precios de manana en
+    // cuanto se publican (~20:30); mientras tanto, las horas que quedan hoy.
+    const poolNecesario = disponiblesManana.length > 0 ? disponiblesManana : disponiblesHoy;
+    const opcionSoloNecesario = calc.seleccionaHorasMasBaratas(poolNecesario, kwhDiaMedio, potenciaCargaKw);
+
+    // B) Cargar hasta el 100% ahora aprovechando lo mas barato de hoy+manana.
+    const bateriaActualKwh = (bateriaActualPct / 100) * capacidadBateriaKwh;
+    const margenKwh = Math.max(0, capacidadBateriaKwh - bateriaActualKwh);
+    const poolCompleto = [...disponiblesHoy, ...disponiblesManana];
+    const opcionCargaCompleta = calc.seleccionaHorasMasBaratas(poolCompleto, margenKwh, potenciaCargaKw);
+    const diasQueCubre = kwhDiaMedio > 0 && opcionCargaCompleta.energiaCubiertaKwh > 0 ? Number((opcionCargaCompleta.energiaCubiertaKwh / kwhDiaMedio).toFixed(1)) : 0;
+
+    let recomendacion = null;
+    if (
+      opcionCargaCompleta.energiaCubiertaKwh > 0 &&
+      opcionSoloNecesario.precioMedioEurKwh != null &&
+      opcionCargaCompleta.precioMedioEurKwh != null
+    ) {
+      // Solo merece la pena cargar de mas si sale claramente mas barato por
+      // kWh (>=3%) Y cubre de verdad varios dias (si no, es la misma carga
+      // de siempre con otro nombre).
+      const compensa = opcionCargaCompleta.precioMedioEurKwh < opcionSoloNecesario.precioMedioEurKwh * 0.97 && diasQueCubre >= 1.5;
+      recomendacion = compensa ? "completa" : "solo-necesario";
     }
-    res.json(await calcularRecomendacion(kwh));
+
+    res.json({
+      kwhDiaMedio: Number(kwhDiaMedio.toFixed(2)),
+      potenciaCargaKw,
+      ventana,
+      bateriaActualPct,
+      capacidadBateriaKwh,
+      mananaDisponible,
+      avisoManana: mananaDisponible ? null : "Los precios de mañana se publican sobre las 20:30. Hasta entonces se usan las horas que quedan hoy.",
+      opcionSoloNecesario,
+      opcionCargaCompleta,
+      diasQueCubre,
+      recomendacion,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -479,18 +536,22 @@ router.post("/notify/test", async (req, res) => {
 router.post("/notify/nightly", async (req, res) => {
   try {
     const settings = await store.getSettings();
-    const kwh = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
+    const ventana = { horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo, horaLlegadaCasa: settings.electrico.horaLlegadaCasa };
+    const potenciaCargaKw = settings.electrico.potenciaCargaKw;
+    const kwhDiaMedio = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
 
     const lineas = [];
 
-    const recomendacion = await calcularRecomendacion(kwh);
-    const rec = recomendacion.recomendacionManana;
-    if (rec && rec.horasUsadas.length > 0) {
+    const { mananaDisponible, disponiblesHoy, disponiblesManana } = await calculaHorasCandidatas({ ventana, potenciaCargaKw });
+    const poolNecesario = disponiblesManana.length > 0 ? disponiblesManana : disponiblesHoy;
+    const rec = calc.seleccionaHorasMasBaratas(poolNecesario, kwhDiaMedio, potenciaCargaKw);
+
+    if (rec.horasUsadas.length > 0) {
       const horas = rec.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
       lineas.push(
-        `🔌 Mejores horas para cargar mañana (${kwh.toFixed(1)} kWh): <b>${horas}</b> · ${rec.precioMedioEurKwh.toFixed(4)} €/kWh de media · ${rec.costeTotal.toFixed(2)} €`
+        `🔌 Mejores horas para cargar mañana (${kwhDiaMedio.toFixed(1)} kWh, ~${rec.horasNecesarias}h a ${potenciaCargaKw}kW): <b>${horas}</b> · ${rec.precioMedioEurKwh.toFixed(4)} €/kWh de media · ${rec.costeTotal.toFixed(2)} €`
       );
-    } else if (!recomendacion.mananaDisponible) {
+    } else if (!mananaDisponible) {
       lineas.push("🔌 Los precios de mañana aún no están publicados (normalmente sobre las 20:30).");
     }
 

@@ -230,6 +230,53 @@ code {
   font-size: 0.85rem;
 }
 
+.plan-opciones {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.plan-opcion {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  position: relative;
+}
+.plan-opcion.recomendada {
+  border-color: var(--ahorro);
+  box-shadow: 0 0 0 1px var(--ahorro);
+}
+.plan-opcion h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.plan-opcion .badge {
+  display: inline-block;
+  background: var(--ahorro);
+  color: #0f1115;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+.plan-opcion .precio-grande {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--electrico);
+}
+.plan-opcion .detalle-linea {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.plan-opcion .horas-lista {
+  font-size: 0.82rem;
+  margin-top: 8px;
+  word-break: break-word;
+}
+
 footer {
   text-align: center;
   color: var(--text-dim);

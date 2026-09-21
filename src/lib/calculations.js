@@ -14,28 +14,6 @@ function costeDiesel({ kmDiaMedio, consumoL100km, precioPorLitro }) {
 }
 
 /**
- * Coste diario/mensual/anual estimado del electrico usando un precio medio EUR/kWh
- * (p.ej. la media de las 24h del PVPC del dia, o el precio medio real de las cargas registradas).
- */
-function costeElectrico({ kmDiaMedio, consumoKwh100km, precioMedioEurKwh }) {
-  const kwhDia = (kmDiaMedio / 100) * consumoKwh100km;
-  const costeDia = kwhDia * precioMedioEurKwh;
-  return {
-    kwhDia: Number(kwhDia.toFixed(2)),
-    costeDia: Number(costeDia.toFixed(2)),
-    costeMes: Number((costeDia * 30).toFixed(2)),
-    costeAnio: Number((costeDia * 365).toFixed(2)),
-    costePorKm: Number((costeDia / kmDiaMedio).toFixed(4)),
-  };
-}
-
-function mediaPrecios(horas) {
-  if (!horas || horas.length === 0) return null;
-  const suma = horas.reduce((acc, h) => acc + h.precioEurKwh, 0);
-  return suma / horas.length;
-}
-
-/**
  * Suma `dias` (puede ser negativo) a una fecha "YYYY-MM-DD" usando aritmetica
  * en UTC, para no depender de la zona horaria local del proceso (evita que
  * "2026-09-21" + 0 dias se convierta en "2026-09-20" al pasar por
@@ -190,9 +168,11 @@ function horasPermitidasEnDia(fechaISO, { horaSalidaTrabajo, horaLlegadaCasa }) 
 }
 
 /**
- * Dada una lista de horas disponibles (cada una con su precio), elige las
+ * Dada una lista de horas disponibles (cada una con su precio, y
+ * opcionalmente su fecha si se combinan horas de varios dias), elige las
  * mas baratas hasta cubrir la energia necesaria, repartiendo como maximo
- * `potenciaCargaKw` por hora (limite fisico del cargador de casa).
+ * `potenciaCargaKw` por hora (limite fisico real del cargador de casa: el
+ * coche NUNCA se carga entero en una sola hora, siempre se reparte).
  */
 function seleccionaHorasMasBaratas(horasDisponibles, energiaNecesariaKwh, potenciaCargaKw) {
   const ordenadas = [...horasDisponibles].sort((a, b) => a.precioEurKwh - b.precioEurKwh);
@@ -206,14 +186,18 @@ function seleccionaHorasMasBaratas(horasDisponibles, energiaNecesariaKwh, potenc
     const energia = Math.min(restante, potenciaCargaKw);
     coste += energia * h.precioEurKwh;
     energiaCubierta += energia;
-    usadas.push({ hora: h.hora, precioEurKwh: h.precioEurKwh, energiaKwh: Number(energia.toFixed(2)) });
+    usadas.push({ ...h, energiaKwh: Number(energia.toFixed(2)) });
     restante -= energia;
   }
 
-  usadas.sort((a, b) => a.hora - b.hora);
+  usadas.sort((a, b) => {
+    if (a.fecha && b.fecha && a.fecha !== b.fecha) return a.fecha < b.fecha ? -1 : 1;
+    return a.hora - b.hora;
+  });
 
   return {
     horasUsadas: usadas,
+    horasNecesarias: Number((energiaNecesariaKwh / potenciaCargaKw).toFixed(1)),
     costeTotal: Number(coste.toFixed(2)),
     energiaCubiertaKwh: Number(energiaCubierta.toFixed(2)),
     energiaNecesariaKwh: Number(energiaNecesariaKwh.toFixed(2)),
@@ -247,8 +231,6 @@ function simulacionCargaRestringida({ dias, kmDiaMedio, consumoKwh100km, potenci
 
 module.exports = {
   costeDiesel,
-  costeElectrico,
-  mediaPrecios,
   segmentosSesion,
   costeSesionCarga,
   sumaDiasISO,

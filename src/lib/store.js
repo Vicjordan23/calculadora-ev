@@ -3,20 +3,22 @@ const { client, init } = require("./db");
 const DEFAULT_SETTINGS = {
   diesel: {
     consumoL100km: 6,
-    kmDiaMedio: 80,
+    kmDiaMedio: 60,
   },
   electrico: {
     modelo: "Tesla Model Y Standard",
     consumoKwh100km: 15,
     capacidadBateriaKwh: 62.5,
-    kmDiaMedio: 80,
+    kmDiaMedio: 60,
     // Ventana real en la que puedes cargar en casa: entre semana solo puedes
     // cargar fuera de tu horario de trabajo (llegas a horaLlegadaCasa, sales
     // a horaSalidaTrabajo al dia siguiente); los fines de semana no aplica
     // ninguna restriccion.
     horaSalidaTrabajo: 8,
     horaLlegadaCasa: 19,
-    potenciaCargaKw: 7.4,
+    // Potencia real disponible para el coche en casa (no toda la potencia
+    // contratada: cable/toma domestica tipica en Espana sin wallbox trifasico).
+    potenciaCargaKw: 3,
   },
   notificaciones: {
     avisoStaleDias: 10,

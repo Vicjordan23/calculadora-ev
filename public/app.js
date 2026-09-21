@@ -61,6 +61,7 @@ async function cargaResumen() {
   }
   if (data.resumenElectrico) {
     document.getElementById("elec-kwh").textContent = `${data.resumenElectrico.kwhDia} kWh`;
+    document.getElementById("elec-horas").textContent = `~${data.resumenElectrico.horasNecesarias} h`;
     document.getElementById("elec-dia").textContent = fmtEur(data.resumenElectrico.costeDia);
     document.getElementById("elec-mes").textContent = fmtEur(data.resumenElectrico.costeMes);
     document.getElementById("elec-anio").textContent = fmtEur(data.resumenElectrico.costeAnio);
@@ -87,10 +88,7 @@ async function cargaResumen() {
 
   document.getElementById(
     "rec-hint"
-  ).textContent = `Solo cuentan las horas en las que realmente podrías cargar en casa (de ${String(s.electrico.horaLlegadaCasa).padStart(2, "0")}:00 a ${String(s.electrico.horaSalidaTrabajo).padStart(2, "0")}:00 entre semana; el fin de semana entero). Te digo cuáles son las más baratas hoy y mañana (disponible desde ~20:30).`;
-
-  const recKwh = document.getElementById("rec-kwh");
-  if (!recKwh.dataset.tocado) recKwh.value = Number(((s.electrico.kmDiaMedio / 100) * s.electrico.consumoKwh100km).toFixed(1));
+  ).textContent = `Solo cuentan las horas en las que realmente podrías cargar en casa (de ${String(s.electrico.horaLlegadaCasa).padStart(2, "0")}:00 a ${String(s.electrico.horaSalidaTrabajo).padStart(2, "0")}:00 entre semana; el fin de semana entero), repartiendo la energía a ${s.electrico.potenciaCargaKw} kW — nunca se carga todo en una hora.`;
 }
 
 async function cargaGraficoManana() {
@@ -106,33 +104,63 @@ async function cargaGraficoManana() {
   }
 }
 
-function formatoHoras(rec) {
-  if (!rec || rec.horasUsadas.length === 0) return "sin horas disponibles";
-  const horas = rec.horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
-  const aviso = rec.coberturaPct < 100 ? ` · ⚠️ solo cubre el ${rec.coberturaPct}% de la energía con las horas permitidas` : "";
-  return `${horas} · ${fmtEur3(rec.precioMedioEurKwh)}/kWh de media · ${fmtEur(rec.costeTotal)} total${aviso}`;
+function formatoHorasLista(horasUsadas) {
+  if (!horasUsadas || horasUsadas.length === 0) return "sin horas disponibles";
+  // Si combina hoy y mañana, distingue por fecha en la etiqueta
+  const fechas = new Set(horasUsadas.map((h) => h.fecha).filter(Boolean));
+  if (fechas.size > 1) {
+    const hoyStr = new Date().toISOString().slice(0, 10);
+    return horasUsadas.map((h) => `${h.fecha === hoyStr ? "hoy" : "mañana"} ${String(h.hora).padStart(2, "0")}h`).join(", ");
+  }
+  return horasUsadas.map((h) => `${String(h.hora).padStart(2, "0")}h`).join(", ");
 }
 
-async function recomendar(kwh) {
+function tarjetaOpcion({ titulo, opcion, recomendada, extra }) {
+  if (!opcion || opcion.horasUsadas.length === 0) {
+    return `<div class="plan-opcion"><h3>${titulo}</h3><div class="detalle-linea">Sin horas disponibles todavía dentro de tu ventana.</div></div>`;
+  }
+  const aviso = opcion.coberturaPct < 100 ? `<div class="detalle-linea">⚠️ Solo cubre el ${opcion.coberturaPct}% de la energía con las horas disponibles ahora mismo.</div>` : "";
+  return `
+    <div class="plan-opcion${recomendada ? " recomendada" : ""}">
+      ${recomendada ? '<div class="badge">✅ Recomendado</div>' : ""}
+      <h3>${titulo}</h3>
+      <div class="precio-grande">${fmtEur3(opcion.precioMedioEurKwh)}/kWh</div>
+      <div class="detalle-linea">${opcion.energiaCubiertaKwh} kWh · ~${opcion.horasNecesarias} h de carga · ${fmtEur(opcion.costeTotal)} total</div>
+      ${extra || ""}
+      ${aviso}
+      <div class="horas-lista">${formatoHorasLista(opcion.horasUsadas)}</div>
+    </div>
+  `;
+}
+
+async function recomendar(bateriaActualPct) {
   const resultado = document.getElementById("recomendacion-resultado");
   resultado.innerHTML = "Calculando...";
   try {
-    const data = await api(`/recommend?kwh=${kwh}`);
+    const data = await api(`/recommend?bateriaActualPct=${bateriaActualPct}`);
+
     let html = "";
-    if (data.recomendacionManana) {
-      html += `<div class="ok">✅ Mañana: ${formatoHoras(data.recomendacionManana)}</div>`;
-    } else if (!data.mananaDisponible) {
-      html += `<div class="warn">ℹ️ ${data.avisoManana}</div>`;
+    if (!data.mananaDisponible) {
+      html += `<div class="recomendacion"><div class="warn">ℹ️ ${data.avisoManana}</div></div>`;
     }
-    if (data.recomendacionHoy && data.recomendacionHoy.horasUsadas.length > 0) {
-      html += `<div>Hoy (horas que quedan): ${formatoHoras(data.recomendacionHoy)}</div>`;
-    }
-    if (!html) {
-      html = `<div class="err">No hay horas disponibles todavía dentro de tu ventana de carga.</div>`;
-    }
+
+    html += `<div class="plan-opciones">
+      ${tarjetaOpcion({
+        titulo: "Solo lo justo para mañana",
+        opcion: data.opcionSoloNecesario,
+        recomendada: data.recomendacion === "solo-necesario",
+      })}
+      ${tarjetaOpcion({
+        titulo: `Cargar al máximo ahora (hasta 100%)`,
+        opcion: data.opcionCargaCompleta,
+        recomendada: data.recomendacion === "completa",
+        extra: data.diasQueCubre ? `<div class="detalle-linea">Cubriría ~${data.diasQueCubre} días de conducción</div>` : "",
+      })}
+    </div>`;
+
     resultado.innerHTML = html;
   } catch (err) {
-    resultado.innerHTML = `<div class="err">${err.message}</div>`;
+    resultado.innerHTML = `<div class="recomendacion"><div class="err">${err.message}</div></div>`;
   }
 }
 
@@ -262,10 +290,7 @@ function initFormularios() {
 
   document.getElementById("form-recomendar").addEventListener("submit", (e) => {
     e.preventDefault();
-    recomendar(document.getElementById("rec-kwh").value);
-  });
-  document.getElementById("rec-kwh").addEventListener("input", (e) => {
-    e.target.dataset.tocado = "1";
+    recomendar(document.getElementById("rec-bateria").value);
   });
 
   document.querySelectorAll('input[name="carga-tipo"]').forEach((radio) => {
@@ -522,4 +547,5 @@ cargaTablaCargas();
 cargaTablaRepostajes();
 cargaEvolucion();
 cargaEstadoNotificaciones();
+recomendar(document.getElementById("rec-bateria").value);
 cargaSimulacion();
