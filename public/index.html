@@ -24,6 +24,8 @@
       <div class="stat-row"><span>Coste/dia</span><strong id="diesel-dia">—</strong></div>
       <div class="stat-row"><span>Coste/mes</span><strong id="diesel-mes">—</strong></div>
       <div class="stat-row"><span>Coste/año</span><strong id="diesel-anio">—</strong></div>
+      <div class="stat-row real"><span>Gastado este mes (real)</span><strong id="diesel-real-mes">—</strong></div>
+      <div class="stat-row real"><span>Gastado este año (real)</span><strong id="diesel-real-anio">—</strong></div>
       <button class="btn-secondary" id="btn-refresh-diesel">Refrescar precio</button>
       <div class="fetch-meta" id="diesel-meta"></div>
     </div>
@@ -47,6 +49,42 @@
       <div class="stat-row"><span>Ahorro/dia</span><strong id="ahorro-dia">—</strong></div>
       <div class="stat-row"><span>Ahorro/mes</span><strong id="ahorro-mes">—</strong></div>
     </div>
+  </section>
+
+  <section class="panel" id="panel-repostajes">
+    <h2>⛽ Repostajes de diésel (gasto real)</h2>
+    <p class="hint">Mientras no tengas el eléctrico, registra aquí cada repostaje para ir viendo lo que gastas de verdad, no solo la estimación teórica de arriba.</p>
+    <form id="form-repostaje" class="grid-form">
+      <label>Fecha
+        <input type="date" id="rep-fecha" required />
+      </label>
+      <label>Litros
+        <input type="number" id="rep-litros" min="0.1" step="0.01" required />
+      </label>
+      <label>Precio/L (€)
+        <input type="number" id="rep-precio" min="0" step="0.001" placeholder="se rellena solo" />
+      </label>
+      <label>o coste total (€)
+        <input type="number" id="rep-total" min="0" step="0.01" placeholder="opcional, si no sabes el €/L" />
+      </label>
+      <label>Km del cuentakilómetros
+        <input type="number" id="rep-km" min="0" step="1" placeholder="opcional" />
+      </label>
+      <label>Gasolinera
+        <input type="text" id="rep-estacion" placeholder="opcional" />
+      </label>
+      <button type="submit" class="btn-primary">Guardar repostaje</button>
+    </form>
+    <div id="repostaje-resultado" class="recomendacion"></div>
+
+    <div class="stats-repostajes" id="stats-repostajes"></div>
+
+    <table class="tabla-cargas" id="tabla-repostajes">
+      <thead>
+        <tr><th>Fecha</th><th>Litros</th><th>€/L</th><th>Total</th><th>Km</th><th>Consumo real</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </section>
 
   <section class="panel">

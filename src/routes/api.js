@@ -222,6 +222,60 @@ router.delete("/charges/:id", async (req, res) => {
   res.json(await store.deleteCharge(req.params.id));
 });
 
+// ---------- Repostajes reales de diesel ----------
+// Mientras no tengas el electrico (o para cuando quieras seguir comparando),
+// aqui se registra el gasto real de cada repostaje, independiente del
+// calculo teorico basado en consumo/km medio.
+
+router.get("/diesel/fills", async (req, res) => {
+  res.json(await store.getDieselFills());
+});
+
+router.post("/diesel/fills", async (req, res) => {
+  try {
+    const { fecha, litros, precioPorLitro, costeTotal, kmOdometro, estacion, notas } = req.body;
+
+    if (!fecha || !litros) {
+      return res.status(400).json({ error: "Faltan campos: fecha, litros" });
+    }
+    const litrosNum = Number(litros);
+    if (!(litrosNum > 0)) {
+      return res.status(400).json({ error: "Los litros deben ser mayores que 0" });
+    }
+
+    let precio = precioPorLitro != null ? Number(precioPorLitro) : null;
+    let total = costeTotal != null ? Number(costeTotal) : null;
+
+    if (precio == null && total != null) {
+      precio = total / litrosNum;
+    } else if (total == null && precio != null) {
+      total = precio * litrosNum;
+    }
+
+    if (!(precio > 0) || !(total > 0)) {
+      return res.status(400).json({ error: "Indica el precio por litro o el coste total del repostaje" });
+    }
+
+    const registro = await store.addDieselFill({
+      fecha,
+      litros: Number(litrosNum.toFixed(2)),
+      precioPorLitro: Number(precio.toFixed(3)),
+      costeTotal: Number(total.toFixed(2)),
+      kmOdometro: kmOdometro != null && kmOdometro !== "" ? Number(kmOdometro) : null,
+      estacion: estacion || null,
+      notas: notas || null,
+    });
+
+    res.status(201).json(registro);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete("/diesel/fills/:id", async (req, res) => {
+  res.json(await store.deleteDieselFill(req.params.id));
+});
+
 // ---------- Recomendacion de horario de carga ----------
 
 router.get("/recommend", async (req, res) => {

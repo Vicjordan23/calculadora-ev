@@ -2,6 +2,7 @@ const fmtEur = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimu
 const fmtEur3 = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €`);
 
 let chartHoy, chartManana;
+let ultimoPrecioDiesel = null;
 
 async function api(path, options) {
   const res = await fetch(`/api${path}`, {
@@ -42,6 +43,9 @@ async function cargaResumen() {
   if (data.diesel) {
     document.getElementById("diesel-precio").textContent = fmtEur3(data.diesel.precioPorLitro);
     document.getElementById("diesel-meta").textContent = `Publicado: ${data.diesel.fechaPublicacion} · ${data.diesel.estaciones.length} estaciones`;
+    ultimoPrecioDiesel = data.diesel.precioPorLitro;
+    const repPrecio = document.getElementById("rep-precio");
+    if (repPrecio && !repPrecio.value) repPrecio.value = ultimoPrecioDiesel;
   }
   if (data.resumenDiesel) {
     document.getElementById("diesel-litros").textContent = `${data.resumenDiesel.litrosDia} L`;
@@ -150,8 +154,88 @@ async function cargaTablaCargas() {
   });
 }
 
+function calculaEstadisticasRepostajes(fillsAsc) {
+  const ahora = new Date();
+  const mesActual = ahora.getMonth();
+  const anioActual = ahora.getFullYear();
+
+  let totalMes = 0;
+  let totalAnio = 0;
+  let litrosParaConsumo = 0;
+  let kmParaConsumo = 0;
+
+  fillsAsc.forEach((f, i) => {
+    const d = new Date(f.fecha + "T00:00:00");
+    if (d.getFullYear() === anioActual) {
+      totalAnio += f.costeTotal;
+      if (d.getMonth() === mesActual) totalMes += f.costeTotal;
+    }
+
+    if (i > 0 && f.kmOdometro != null && fillsAsc[i - 1].kmOdometro != null) {
+      const deltaKm = f.kmOdometro - fillsAsc[i - 1].kmOdometro;
+      if (deltaKm > 0) {
+        f.consumoRealL100km = Number(((f.litros / deltaKm) * 100).toFixed(2));
+        litrosParaConsumo += f.litros;
+        kmParaConsumo += deltaKm;
+      }
+    }
+  });
+
+  const consumoRealMedio = kmParaConsumo > 0 ? Number(((litrosParaConsumo / kmParaConsumo) * 100).toFixed(2)) : null;
+
+  return {
+    totalMes: Number(totalMes.toFixed(2)),
+    totalAnio: Number(totalAnio.toFixed(2)),
+    numRepostajes: fillsAsc.length,
+    consumoRealMedio,
+  };
+}
+
+async function cargaTablaRepostajes() {
+  const fillsAsc = await api("/diesel/fills"); // viene ordenado por fecha ascendente
+  const stats = calculaEstadisticasRepostajes(fillsAsc);
+
+  document.getElementById("diesel-real-mes").textContent = fmtEur(stats.totalMes);
+  document.getElementById("diesel-real-anio").textContent = fmtEur(stats.totalAnio);
+
+  document.getElementById("stats-repostajes").innerHTML = `
+    <div class="stat-box"><span>Repostajes registrados</span><strong>${stats.numRepostajes}</strong></div>
+    <div class="stat-box"><span>Gastado este mes</span><strong>${fmtEur(stats.totalMes)}</strong></div>
+    <div class="stat-box"><span>Gastado este año</span><strong>${fmtEur(stats.totalAnio)}</strong></div>
+    <div class="stat-box"><span>Consumo real medio</span><strong>${stats.consumoRealMedio != null ? stats.consumoRealMedio + " L/100km" : "— (falta km)"}</strong></div>
+  `;
+
+  const tbody = document.querySelector("#tabla-repostajes tbody");
+  tbody.innerHTML = "";
+  fillsAsc
+    .slice()
+    .reverse()
+    .forEach((f) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${f.fecha}</td>
+        <td>${f.litros} L</td>
+        <td>${fmtEur3(f.precioPorLitro)}</td>
+        <td>${fmtEur(f.costeTotal)}</td>
+        <td>${f.kmOdometro ?? "—"}</td>
+        <td>${f.consumoRealL100km != null ? f.consumoRealL100km + " L/100km" : "—"}</td>
+        <td><button data-id="${f.id}">✕</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+  tbody.querySelectorAll("button[data-id]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await api(`/diesel/fills/${btn.dataset.id}`, { method: "DELETE" });
+      cargaTablaRepostajes();
+    });
+  });
+}
+
 function initFormularios() {
   document.getElementById("carga-fecha").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("rep-fecha").value = new Date().toISOString().slice(0, 10);
+  if (ultimoPrecioDiesel) document.getElementById("rep-precio").value = ultimoPrecioDiesel;
 
   document.getElementById("btn-refresh-diesel").addEventListener("click", async (e) => {
     e.preventDefault();
@@ -193,6 +277,29 @@ function initFormularios() {
     }
   });
 
+  document.getElementById("form-repostaje").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const resultado = document.getElementById("repostaje-resultado");
+    const body = {
+      fecha: document.getElementById("rep-fecha").value,
+      litros: Number(document.getElementById("rep-litros").value),
+      precioPorLitro: document.getElementById("rep-precio").value || null,
+      costeTotal: document.getElementById("rep-total").value || null,
+      kmOdometro: document.getElementById("rep-km").value || null,
+      estacion: document.getElementById("rep-estacion").value || null,
+    };
+    try {
+      const registro = await api("/diesel/fills", { method: "POST", body: JSON.stringify(body) });
+      resultado.innerHTML = `<div class="ok">Guardado: ${registro.litros} L a ${fmtEur3(registro.precioPorLitro)}/L · total ${fmtEur(registro.costeTotal)}</div>`;
+      e.target.reset();
+      document.getElementById("rep-fecha").value = new Date().toISOString().slice(0, 10);
+      if (ultimoPrecioDiesel) document.getElementById("rep-precio").value = ultimoPrecioDiesel;
+      cargaTablaRepostajes();
+    } catch (err) {
+      resultado.innerHTML = `<div class="err">${err.message}</div>`;
+    }
+  });
+
   document.getElementById("form-ajustes").addEventListener("submit", async (e) => {
     e.preventDefault();
     await api("/settings", {
@@ -217,3 +324,4 @@ initFormularios();
 cargaResumen();
 cargaGraficoManana();
 cargaTablaCargas();
+cargaTablaRepostajes();

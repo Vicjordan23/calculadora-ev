@@ -137,6 +137,54 @@ async function deleteCharge(id) {
   return getCharges();
 }
 
+function rowToDieselFill(r) {
+  return {
+    id: r.id,
+    fecha: r.fecha,
+    litros: r.litros,
+    precioPorLitro: r.precio_por_litro,
+    costeTotal: r.coste_total,
+    kmOdometro: r.km_odometro,
+    estacion: r.estacion,
+    notas: r.notas,
+  };
+}
+
+async function getDieselFills() {
+  await init();
+  const res = await client.execute("SELECT * FROM diesel_fills ORDER BY fecha ASC, creado_en ASC");
+  return res.rows.map(rowToDieselFill);
+}
+
+async function addDieselFill(fill) {
+  await init();
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const creadoEn = new Date().toISOString();
+  await client.execute({
+    sql: `INSERT INTO diesel_fills
+      (id, fecha, litros, precio_por_litro, coste_total, km_odometro, estacion, notas, creado_en)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      id,
+      fill.fecha,
+      fill.litros,
+      fill.precioPorLitro,
+      fill.costeTotal,
+      fill.kmOdometro ?? null,
+      fill.estacion ?? null,
+      fill.notas ?? null,
+      creadoEn,
+    ],
+  });
+  return { id, ...fill };
+}
+
+async function deleteDieselFill(id) {
+  await init();
+  await client.execute({ sql: "DELETE FROM diesel_fills WHERE id = ?", args: [id] });
+  return getDieselFills();
+}
+
 module.exports = {
   getSettings,
   saveSettings,
@@ -148,4 +196,7 @@ module.exports = {
   getCharges,
   addCharge,
   deleteCharge,
+  getDieselFills,
+  addDieselFill,
+  deleteDieselFill,
 };

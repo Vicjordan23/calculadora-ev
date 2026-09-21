@@ -44,6 +44,18 @@ CREATE TABLE IF NOT EXISTS charges (
   detalle TEXT NOT NULL,
   creado_en TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS diesel_fills (
+  id TEXT PRIMARY KEY,
+  fecha TEXT NOT NULL,
+  litros REAL NOT NULL,
+  precio_por_litro REAL NOT NULL,
+  coste_total REAL NOT NULL,
+  km_odometro REAL,
+  estacion TEXT,
+  notas TEXT,
+  creado_en TEXT NOT NULL
+);
 `;
 
 let ready = null;
