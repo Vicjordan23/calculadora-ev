@@ -95,7 +95,6 @@ async function cargaResumen() {
 
   if (data.electricidadHoy) {
     document.getElementById("elec-precio").textContent = fmtEur3(data.electricidadHoy.precioMedioEurKwh);
-    document.getElementById("elec-meta").textContent = `PVPC ${data.electricidadHoy.fecha}`;
   }
   if (data.resumenElectrico) {
     document.getElementById("elec-kwh").textContent = `${data.resumenElectrico.kwhDia} kWh`;
@@ -103,6 +102,11 @@ async function cargaResumen() {
     document.getElementById("elec-dia").textContent = fmtEur(data.resumenElectrico.costeDia);
     document.getElementById("elec-mes").textContent = fmtEur(data.resumenElectrico.costeMes);
     document.getElementById("elec-anio").textContent = fmtEur(data.resumenElectrico.costeAnio);
+    const m = data.resumenElectrico.muestrasProyeccion;
+    document.getElementById("elec-meta").textContent =
+      m > 1
+        ? `€/día con el precio de hoy · mes/año con la media de tus mejores horas de ${m} días`
+        : `PVPC ${data.electricidadHoy?.fecha || ""} · mes/año todavía con solo 1 día de histórico`;
   }
 
   if (data.ahorro) {
@@ -157,7 +161,7 @@ async function cargaComparativa() {
       diffEl.textContent = "—";
     }
 
-    meta.textContent = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh de media${data.muestrasPrecioElec > 0 ? ` (${data.muestrasPrecioElec} días de histórico)` : " (solo precio de hoy, aún sin histórico)"}` : ""}`;
+    meta.textContent = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh (media de cargar en tus horas más baratas${data.muestrasPrecioElec > 0 ? `, ${data.muestrasPrecioElec} día${data.muestrasPrecioElec === 1 ? "" : "s"} de histórico` : ""})` : ""}`;
   } catch (err) {
     meta.textContent = `No se pudo calcular: ${err.message}`;
   }

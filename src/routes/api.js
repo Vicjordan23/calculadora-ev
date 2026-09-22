@@ -15,6 +15,32 @@ function fechaISO(offsetDias = 0) {
   return toDateParam(d);
 }
 
+// Precio medio "real" de cargar: NUNCA la media de las 24h del dia, siempre
+// la media (entre los dias que tengamos guardados) de lo que costaria cada
+// dia cargando solo en las horas mas baratas dentro de la ventana real
+// disponible (ver simulacionCargaRestringida). Se reutiliza tanto para la
+// comparativa principal como para la proyeccion mensual/anual del resumen,
+// para que ningun numero de la app se base en una media plana.
+async function precioMedioCargaReal(settings) {
+  const cacheAll = await store.getElectricityCacheAll();
+  if (cacheAll.length === 0) return null;
+
+  const dias = calc.simulacionCargaRestringida({
+    dias: cacheAll,
+    kmDiaMedio: settings.electrico.kmDiaMedio,
+    consumoKwh100km: settings.electrico.consumoKwh100km,
+    potenciaCargaKw: settings.electrico.potenciaCargaKw,
+    horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo,
+    horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
+  });
+
+  const validos = dias.filter((d) => d.precioMedioEurKwh != null);
+  if (validos.length === 0) return null;
+
+  const media = validos.reduce((a, d) => a + d.precioMedioEurKwh, 0) / validos.length;
+  return { precioMedioEurKwh: media, muestras: validos.length };
+}
+
 // "Enchufa de 19:00 a 20:00 y de 22:00 a 00:00" en vez de una lista suelta
 // de horas: asi es como se usa un cargador de verdad.
 function formatoBloques(horasUsadas) {
@@ -152,14 +178,22 @@ router.get("/summary", async (req, res) => {
       const disponiblesHoy = electricidadHoy.horas.filter((h) => permitidasHoy.has(h.hora));
       const cargaHoy = calc.seleccionaHorasMasBaratas(disponiblesHoy, kwhDiaMedio, settings.electrico.potenciaCargaKw);
       if (cargaHoy.energiaCubiertaKwh > 0) {
+        // Para mes/año usamos la media de varios dias reales cargando en las
+        // horas mas baratas (mas estable que multiplicar solo el dia de hoy,
+        // que puede ser puntualmente mas barato o mas caro de lo normal).
+        const precioReal = await precioMedioCargaReal(settings);
+        const precioParaProyeccion = precioReal?.precioMedioEurKwh ?? cargaHoy.precioMedioEurKwh;
+        const costeDiaProyeccion = kwhDiaMedio * precioParaProyeccion;
+
         resumenElectrico = {
           kwhDia: Number(kwhDiaMedio.toFixed(2)),
           costeDia: cargaHoy.costeTotal,
-          costeMes: Number((cargaHoy.costeTotal * 30).toFixed(2)),
-          costeAnio: Number((cargaHoy.costeTotal * 365).toFixed(2)),
+          costeMes: Number((costeDiaProyeccion * 30).toFixed(2)),
+          costeAnio: Number((costeDiaProyeccion * 365).toFixed(2)),
           costePorKm: Number((cargaHoy.costeTotal / settings.electrico.kmDiaMedio).toFixed(4)),
           precioMedioEurKwh: cargaHoy.precioMedioEurKwh,
           horasNecesarias: cargaHoy.horasNecesarias,
+          muestrasProyeccion: precioReal?.muestras ?? 1,
         };
       }
     }
@@ -359,18 +393,13 @@ router.delete("/diesel/fills/:id", async (req, res) => {
 // ---------- Comparativa principal: diesel real vs Tesla (mismos km) ----------
 // La pregunta que de verdad importa: de los km que REALMENTE has recorrido
 // (inferidos de los litros que has comprado, no de una media supuesta),
-// cuanto habrian costado en el Tesla cargando en casa. Se usa el precio
-// medio de electricidad que tengamos (historico si hay, si no el de hoy).
+// cuanto habrian costado en el Tesla cargando en casa. El precio de la luz
+// usado es la media de lo que costaria cada dia cargando SOLO en tus horas
+// mas baratas dentro de la ventana real (nunca la media de las 24h).
 
 router.get("/comparativa", async (req, res) => {
   try {
-    const [fills, settings, historialElec, dieselCache, electricidadHoy] = await Promise.all([
-      store.getDieselFills(),
-      store.getSettings(),
-      store.getElectricityHistory(),
-      store.getDieselCache(),
-      obtenerPreciosDia(fechaISO(0)).catch(() => null),
-    ]);
+    const [fills, settings, dieselCache] = await Promise.all([store.getDieselFills(), store.getSettings(), store.getDieselCache()]);
 
     if (fills.length === 0) {
       return res.json({ hayDatos: false });
@@ -381,14 +410,8 @@ router.get("/comparativa", async (req, res) => {
     const kmEstimados = (totalLitros / settings.diesel.consumoL100km) * 100;
     const kwhEquivalente = (kmEstimados / 100) * settings.electrico.consumoKwh100km;
 
-    let precioMedioEurKwh = null;
-    if (historialElec.length > 0) {
-      precioMedioEurKwh = historialElec.reduce((a, h) => a + h.precioMedioEurKwh, 0) / historialElec.length;
-    } else if (electricidadHoy) {
-      precioMedioEurKwh = electricidadHoy.horas.reduce((a, h) => a + h.precioEurKwh, 0) / electricidadHoy.horas.length;
-    }
-
-    const costeTeslaEstimado = precioMedioEurKwh != null ? kwhEquivalente * precioMedioEurKwh : null;
+    const precioReal = await precioMedioCargaReal(settings);
+    const costeTeslaEstimado = precioReal != null ? kwhEquivalente * precioReal.precioMedioEurKwh : null;
 
     const fechas = fills.map((f) => f.fecha).sort();
 
@@ -401,8 +424,8 @@ router.get("/comparativa", async (req, res) => {
       kmEstimados: Number(kmEstimados.toFixed(0)),
       costeDieselReal: Number(costeDieselReal.toFixed(2)),
       kwhEquivalente: Number(kwhEquivalente.toFixed(1)),
-      precioMedioEurKwh: precioMedioEurKwh != null ? Number(precioMedioEurKwh.toFixed(5)) : null,
-      muestrasPrecioElec: historialElec.length,
+      precioMedioEurKwh: precioReal != null ? Number(precioReal.precioMedioEurKwh.toFixed(5)) : null,
+      muestrasPrecioElec: precioReal != null ? precioReal.muestras : 0,
       costeTeslaEstimado: costeTeslaEstimado != null ? Number(costeTeslaEstimado.toFixed(2)) : null,
       diferencia: costeTeslaEstimado != null ? Number((costeDieselReal - costeTeslaEstimado).toFixed(2)) : null,
       precioDieselActual: dieselCache?.precioPorLitro ?? null,
