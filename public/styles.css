@@ -315,6 +315,49 @@ code {
   word-break: break-word;
 }
 
+.comparativa-principal {
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.comparativa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.comp-box {
+  background: var(--panel-2);
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-align: center;
+}
+.comp-box span {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin-bottom: 6px;
+}
+.comp-box strong { font-size: 1.7rem; font-weight: 700; }
+.comp-box.diesel strong { color: var(--diesel); }
+.comp-box.electrico strong { color: var(--electrico); }
+.comp-box.ahorro strong { color: var(--ahorro); }
+
+#seccion-estimacion { opacity: 0.9; }
+#seccion-estimacion h2 { font-size: 1rem; }
+#seccion-estimacion .cards { margin: 14px 0 0; }
+
+#seccion-cuando-tengas-tesla.oculto { display: none; }
+
+.check-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  color: var(--text) !important;
+  cursor: pointer;
+  font-size: 0.92rem !important;
+}
+.check-label input { width: 18px; height: 18px; }
+
 footer {
   text-align: center;
   color: var(--text-dim);
@@ -324,4 +367,13 @@ footer {
 
 @media (max-width: 600px) {
   .card .price { font-size: 1.6rem; }
+  .comp-box strong { font-size: 1.4rem; }
+  main { padding: 12px 14px 50px; }
+  .panel { padding: 16px 16px; }
+  .app-header { padding: 20px 16px 6px; }
+  .app-header h1 { font-size: 1.35rem; }
+  .btn-primary, .btn-secondary { padding: 11px 16px; font-size: 0.95rem; }
+  input { padding: 10px 12px; font-size: 1rem; }
+  .dia-toggle { flex-wrap: wrap; }
+  .dia-btn { flex: 1; min-width: 90px; }
 }

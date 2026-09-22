@@ -113,6 +113,8 @@ async function cargaResumen() {
 
   // Ajustes: precarga los valores actuales
   const s = data.settings;
+  document.getElementById("set-tiene-coche").checked = !!s.tieneCocheElectrico;
+  aplicaVisibilidadTesla(!!s.tieneCocheElectrico);
   document.getElementById("set-diesel-consumo").value = s.diesel.consumoL100km;
   document.getElementById("set-diesel-km").value = s.diesel.kmDiaMedio;
   document.getElementById("set-elec-consumo").value = s.electrico.consumoKwh100km;
@@ -127,6 +129,38 @@ async function cargaResumen() {
   document.getElementById(
     "rec-hint"
   ).textContent = `Solo cuentan las horas en las que realmente podrías cargar en casa (de ${String(s.electrico.horaLlegadaCasa).padStart(2, "0")}:00 a ${String(s.electrico.horaSalidaTrabajo).padStart(2, "0")}:00 entre semana; el fin de semana entero), repartiendo la energía a ${s.electrico.potenciaCargaKw} kW — nunca se carga todo en una hora.`;
+}
+
+function aplicaVisibilidadTesla(tiene) {
+  document.getElementById("seccion-cuando-tengas-tesla").classList.toggle("oculto", !tiene);
+}
+
+async function cargaComparativa() {
+  const meta = document.getElementById("comp-meta");
+  try {
+    const data = await api("/comparativa");
+    if (!data.hayDatos) {
+      document.getElementById("comp-diesel").textContent = "—";
+      document.getElementById("comp-tesla").textContent = "—";
+      document.getElementById("comp-diferencia").textContent = "—";
+      meta.textContent = "Registra tu primer repostaje para empezar a ver la comparativa.";
+      return;
+    }
+
+    document.getElementById("comp-diesel").textContent = fmtEur(data.costeDieselReal);
+    document.getElementById("comp-tesla").textContent = data.costeTeslaEstimado != null ? fmtEur(data.costeTeslaEstimado) : "—";
+    const diffEl = document.getElementById("comp-diferencia");
+    if (data.diferencia != null) {
+      diffEl.textContent = `${data.diferencia >= 0 ? "+" : ""}${fmtEur(data.diferencia)}`;
+      diffEl.style.color = data.diferencia >= 0 ? "var(--ahorro)" : "var(--danger)";
+    } else {
+      diffEl.textContent = "—";
+    }
+
+    meta.textContent = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh de media${data.muestrasPrecioElec > 0 ? ` (${data.muestrasPrecioElec} días de histórico)` : " (solo precio de hoy, aún sin histórico)"}` : ""}`;
+  } catch (err) {
+    meta.textContent = `No se pudo calcular: ${err.message}`;
+  }
 }
 
 function formatoBloques(bloques) {
@@ -272,6 +306,8 @@ function calculaEstadisticasRepostajes(fillsAsc) {
   };
 }
 
+let mostrarTodosRepostajes = false;
+
 async function cargaTablaRepostajes() {
   const fillsAsc = await api("/diesel/fills"); // viene ordenado por fecha ascendente
   const stats = calculaEstadisticasRepostajes(fillsAsc);
@@ -286,12 +322,15 @@ async function cargaTablaRepostajes() {
     <div class="stat-box"><span>Consumo real medio</span><strong>${stats.consumoRealMedio != null ? stats.consumoRealMedio + " L/100km" : "— (falta km)"}</strong></div>
   `;
 
+  const btnToggle = document.getElementById("btn-toggle-repostajes");
+  const LIMITE = 5;
+  btnToggle.style.display = fillsAsc.length > LIMITE ? "inline-block" : "none";
+  btnToggle.textContent = mostrarTodosRepostajes ? "Ver menos" : `Ver todos (${fillsAsc.length})`;
+
   const tbody = document.querySelector("#tabla-repostajes tbody");
   tbody.innerHTML = "";
-  fillsAsc
-    .slice()
-    .reverse()
-    .forEach((f) => {
+  const paraMostrar = fillsAsc.slice().reverse();
+  (mostrarTodosRepostajes ? paraMostrar : paraMostrar.slice(0, LIMITE)).forEach((f) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${f.fecha}</td>
@@ -309,6 +348,7 @@ async function cargaTablaRepostajes() {
     btn.addEventListener("click", async () => {
       await api(`/diesel/fills/${btn.dataset.id}`, { method: "DELETE" });
       cargaTablaRepostajes();
+      cargaComparativa();
     });
   });
 }
@@ -337,6 +377,16 @@ function initFormularios() {
 
   document.querySelectorAll(".dia-btn").forEach((btn) => {
     btn.addEventListener("click", () => cargaGraficoDia(btn.dataset.dia));
+  });
+
+  document.getElementById("btn-toggle-repostajes").addEventListener("click", (e) => {
+    e.preventDefault();
+    mostrarTodosRepostajes = !mostrarTodosRepostajes;
+    cargaTablaRepostajes();
+  });
+
+  document.getElementById("set-tiene-coche").addEventListener("change", (e) => {
+    aplicaVisibilidadTesla(e.target.checked);
   });
 
   document.querySelectorAll('input[name="carga-tipo"]').forEach((radio) => {
@@ -400,6 +450,7 @@ function initFormularios() {
       document.getElementById("rep-fecha").value = new Date().toISOString().slice(0, 10);
       if (ultimoPrecioDiesel) document.getElementById("rep-precio").value = ultimoPrecioDiesel;
       cargaTablaRepostajes();
+      cargaComparativa();
     } catch (err) {
       resultado.innerHTML = `<div class="err">${err.message}</div>`;
     }
@@ -410,6 +461,7 @@ function initFormularios() {
     await api("/settings", {
       method: "POST",
       body: JSON.stringify({
+        tieneCocheElectrico: document.getElementById("set-tiene-coche").checked,
         diesel: {
           consumoL100km: Number(document.getElementById("set-diesel-consumo").value),
           kmDiaMedio: Number(document.getElementById("set-diesel-km").value),
@@ -587,6 +639,7 @@ if ("serviceWorker" in navigator) {
 
 initFormularios();
 cargaResumen();
+cargaComparativa();
 cargaGraficoDia("hoy");
 cargaTablaCargas();
 cargaTablaRepostajes();

@@ -356,6 +356,62 @@ router.delete("/diesel/fills/:id", async (req, res) => {
   res.json(await store.deleteDieselFill(req.params.id));
 });
 
+// ---------- Comparativa principal: diesel real vs Tesla (mismos km) ----------
+// La pregunta que de verdad importa: de los km que REALMENTE has recorrido
+// (inferidos de los litros que has comprado, no de una media supuesta),
+// cuanto habrian costado en el Tesla cargando en casa. Se usa el precio
+// medio de electricidad que tengamos (historico si hay, si no el de hoy).
+
+router.get("/comparativa", async (req, res) => {
+  try {
+    const [fills, settings, historialElec, dieselCache, electricidadHoy] = await Promise.all([
+      store.getDieselFills(),
+      store.getSettings(),
+      store.getElectricityHistory(),
+      store.getDieselCache(),
+      obtenerPreciosDia(fechaISO(0)).catch(() => null),
+    ]);
+
+    if (fills.length === 0) {
+      return res.json({ hayDatos: false });
+    }
+
+    const totalLitros = fills.reduce((a, f) => a + f.litros, 0);
+    const costeDieselReal = fills.reduce((a, f) => a + f.costeTotal, 0);
+    const kmEstimados = (totalLitros / settings.diesel.consumoL100km) * 100;
+    const kwhEquivalente = (kmEstimados / 100) * settings.electrico.consumoKwh100km;
+
+    let precioMedioEurKwh = null;
+    if (historialElec.length > 0) {
+      precioMedioEurKwh = historialElec.reduce((a, h) => a + h.precioMedioEurKwh, 0) / historialElec.length;
+    } else if (electricidadHoy) {
+      precioMedioEurKwh = electricidadHoy.horas.reduce((a, h) => a + h.precioEurKwh, 0) / electricidadHoy.horas.length;
+    }
+
+    const costeTeslaEstimado = precioMedioEurKwh != null ? kwhEquivalente * precioMedioEurKwh : null;
+
+    const fechas = fills.map((f) => f.fecha).sort();
+
+    res.json({
+      hayDatos: true,
+      desde: fechas[0],
+      hasta: fechas[fechas.length - 1],
+      numRepostajes: fills.length,
+      totalLitros: Number(totalLitros.toFixed(1)),
+      kmEstimados: Number(kmEstimados.toFixed(0)),
+      costeDieselReal: Number(costeDieselReal.toFixed(2)),
+      kwhEquivalente: Number(kwhEquivalente.toFixed(1)),
+      precioMedioEurKwh: precioMedioEurKwh != null ? Number(precioMedioEurKwh.toFixed(5)) : null,
+      muestrasPrecioElec: historialElec.length,
+      costeTeslaEstimado: costeTeslaEstimado != null ? Number(costeTeslaEstimado.toFixed(2)) : null,
+      diferencia: costeTeslaEstimado != null ? Number((costeDieselReal - costeTeslaEstimado).toFixed(2)) : null,
+      precioDieselActual: dieselCache?.precioPorLitro ?? null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------- Evolucion mensual (real vs teorico) ----------
 
 router.get("/diesel/evolution", async (req, res) => {

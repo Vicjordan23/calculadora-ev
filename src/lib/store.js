@@ -1,6 +1,11 @@
 const { client, init } = require("./db");
 
 const DEFAULT_SETTINGS = {
+  // Mientras esto sea false, la app oculta todo lo que solo tiene sentido
+  // con el coche ya en casa (planificador de carga, registrar carga,
+  // precio de la luz por horas), para no meter ruido en el uso diario:
+  // registrar repostajes y ver la comparativa real vs Tesla.
+  tieneCocheElectrico: false,
   diesel: {
     consumoL100km: 6,
     kmDiaMedio: 60,
@@ -45,6 +50,7 @@ async function getSettings() {
   const stored = await getKv("settings");
   if (!stored) return DEFAULT_SETTINGS;
   return {
+    tieneCocheElectrico: stored.tieneCocheElectrico ?? DEFAULT_SETTINGS.tieneCocheElectrico,
     diesel: { ...DEFAULT_SETTINGS.diesel, ...(stored.diesel || {}) },
     electrico: { ...DEFAULT_SETTINGS.electrico, ...(stored.electrico || {}) },
     notificaciones: { ...DEFAULT_SETTINGS.notificaciones, ...(stored.notificaciones || {}) },
@@ -54,6 +60,7 @@ async function getSettings() {
 async function saveSettings(partial) {
   const current = await getSettings();
   const merged = {
+    tieneCocheElectrico: partial.tieneCocheElectrico ?? current.tieneCocheElectrico,
     diesel: { ...current.diesel, ...(partial.diesel || {}) },
     electrico: { ...current.electrico, ...(partial.electrico || {}) },
     notificaciones: { ...current.notificaciones, ...(partial.notificaciones || {}) },
