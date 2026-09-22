@@ -111,13 +111,15 @@
   </section>
 
   <section class="panel">
-    <h2>Precio de la luz hoy (PVPC) — por horas</h2>
-    <canvas id="chart-hoy" height="90"></canvas>
-  </section>
-
-  <section class="panel" id="panel-manana" style="display:none">
-    <h2>Precio de la luz mañana (PVPC) — por horas</h2>
-    <canvas id="chart-manana" height="90"></canvas>
+    <h2>📊 Precio de la luz (PVPC) — por horas</h2>
+    <div class="dia-toggle">
+      <button type="button" class="btn-secondary dia-btn" data-dia="ayer">Ayer</button>
+      <button type="button" class="btn-secondary dia-btn activo" data-dia="hoy">Hoy</button>
+      <button type="button" class="btn-secondary dia-btn" data-dia="manana">Mañana</button>
+    </div>
+    <canvas id="chart-precios" height="110"></canvas>
+    <div id="chart-precios-meta" class="fetch-meta"></div>
+    <div class="leyenda-chart"><span class="muestra muestra-normal"></span> precio · <span class="muestra muestra-recomendada"></span> horas recomendadas para cargar (según el plan de abajo)</div>
   </section>
 
   <section class="panel">

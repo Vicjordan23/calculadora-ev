@@ -1,4 +1,10 @@
 require("dotenv").config();
+// Fuerza la zona horaria de todo el proceso a la de España: sin esto, en
+// un servidor en la nube (normalmente UTC) "que hora es ahora" y "que dia
+// es hoy" salen mal por 1-2 horas, lo que descuadra que horas cuentan como
+// "las que quedan hoy" y cuando cruza la medianoche real de España.
+process.env.TZ = "Europe/Madrid";
+
 const path = require("path");
 const express = require("express");
 const cron = require("node-cron");
@@ -22,29 +28,37 @@ app.listen(PORT, () => {
 // ---------- Refresco automatico ----------
 // Diesel: se actualiza una vez al dia por la manana en la fuente oficial;
 // refrescamos a las 07:00 y otra vez a las 14:00 (franja horaria que pediste).
-cron.schedule("0 7,14 * * *", async () => {
-  try {
-    const precio = await fetchDieselPrice();
-    await store.saveDieselCache(precio);
-    console.log(`[cron] Precio diesel actualizado: ${precio.precioPorLitro} EUR/L`);
-  } catch (err) {
-    console.error("[cron] Error actualizando precio diesel:", err.message);
-  }
-});
+cron.schedule(
+  "0 7,14 * * *",
+  async () => {
+    try {
+      const precio = await fetchDieselPrice();
+      await store.saveDieselCache(precio);
+      console.log(`[cron] Precio diesel actualizado: ${precio.precioPorLitro} EUR/L`);
+    } catch (err) {
+      console.error("[cron] Error actualizando precio diesel:", err.message);
+    }
+  },
+  { timezone: "Europe/Madrid" }
+);
 
 // Electricidad: el precio del dia siguiente se publica sobre las 20:30.
 // Reintentamos a las 20:35 y, por si acaso, otra vez a las 21:00.
-cron.schedule("35 20,21 * * *", async () => {
-  try {
-    const manana = new Date();
-    manana.setDate(manana.getDate() + 1);
-    const precios = await fetchElectricityPrices(manana);
-    await store.saveElectricityPrices(precios);
-    console.log(`[cron] Precios PVPC de manana (${toDateParam(manana)}) guardados.`);
-  } catch (err) {
-    console.error("[cron] Error actualizando precios PVPC de manana:", err.message);
-  }
-});
+cron.schedule(
+  "35 20,21 * * *",
+  async () => {
+    try {
+      const manana = new Date();
+      manana.setDate(manana.getDate() + 1);
+      const precios = await fetchElectricityPrices(manana);
+      await store.saveElectricityPrices(precios);
+      console.log(`[cron] Precios PVPC de manana (${toDateParam(manana)}) guardados.`);
+    } catch (err) {
+      console.error("[cron] Error actualizando precios PVPC de manana:", err.message);
+    }
+  },
+  { timezone: "Europe/Madrid" }
+);
 
 // Aviso nocturno por Telegram (recomendacion de carga + alertas). Solo tiene
 // efecto si TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID estan configurados; si no,
@@ -52,12 +66,16 @@ cron.schedule("35 20,21 * * *", async () => {
 // encendida (Raspberry Pi, PC de casa...); en Render gratis usa en su lugar
 // un cron externo (cron-job.org) porque el servicio duerme y este cron
 // interno no se ejecutaria (ver DEPLOY.md).
-cron.schedule("40 20 * * *", async () => {
-  try {
-    const res = await fetch(`http://localhost:${PORT}/api/notify/nightly`, { method: "POST" });
-    const data = await res.json();
-    console.log("[cron] Aviso nocturno:", data.telegram?.enviado ? "enviado" : data.telegram?.motivo || data.error);
-  } catch (err) {
-    console.error("[cron] Error en aviso nocturno:", err.message);
-  }
-});
+cron.schedule(
+  "40 20 * * *",
+  async () => {
+    try {
+      const res = await fetch(`http://localhost:${PORT}/api/notify/nightly`, { method: "POST" });
+      const data = await res.json();
+      console.log("[cron] Aviso nocturno:", data.telegram?.enviado ? "enviado" : data.telegram?.motivo || data.error);
+    } catch (err) {
+      console.error("[cron] Error en aviso nocturno:", err.message);
+    }
+  },
+  { timezone: "Europe/Madrid" }
+);

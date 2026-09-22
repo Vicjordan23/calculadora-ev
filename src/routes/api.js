@@ -74,7 +74,9 @@ router.get("/diesel/history", async (req, res) => {
 
 async function obtenerPreciosDia(fecha) {
   const cache = await store.getElectricityForDate(fecha);
-  if (cache) return cache;
+  // Si la cache tiene menos de 20 horas es que algo salio mal en un fetch
+  // anterior (dato incompleto): mejor reintentar que quedarnos con eso.
+  if (cache && Array.isArray(cache.horas) && cache.horas.length >= 20) return cache;
   const precios = await fetchElectricityPrices(new Date(fecha + "T12:00:00"));
   return store.saveElectricityPrices(precios);
 }
@@ -439,17 +441,21 @@ router.get("/recommend", async (req, res) => {
 
     const { mananaDisponible, disponiblesHoy, disponiblesManana } = await calculaHorasCandidatas({ ventana, potenciaCargaKw });
 
-    // A) Solo lo necesario para el dia siguiente: usa precios de manana en
-    // cuanto se publican (~20:30); mientras tanto, las horas que quedan hoy.
-    const poolNecesario = disponiblesManana.length > 0 ? disponiblesManana : disponiblesHoy;
-    const opcionSoloNecesario = calc.seleccionaHorasMasBaratas(poolNecesario, kwhDiaMedio, potenciaCargaKw);
+    // Bolsa de horas candidatas: SIEMPRE la union de lo que queda de hoy +
+    // todo manana (cuando ya se conoce). No tiene sentido descartar una
+    // hora barata que quede esta noche solo porque ya hay datos de manana
+    // (antes se usaba una u otra en exclusiva, lo que podia ignorar una
+    // hora de esta noche mas barata que cualquier hora de manana).
+    const pool = [...disponiblesHoy, ...disponiblesManana];
+
+    // A) Solo lo necesario para el dia siguiente.
+    const opcionSoloNecesario = calc.seleccionaHorasMasBaratas(pool, kwhDiaMedio, potenciaCargaKw);
     opcionSoloNecesario.bloques = calc.agrupaBloques(opcionSoloNecesario.horasUsadas);
 
     // B) Cargar hasta el 100% ahora aprovechando lo mas barato de hoy+manana.
     const bateriaActualKwh = (bateriaActualPct / 100) * capacidadBateriaKwh;
     const margenKwh = Math.max(0, capacidadBateriaKwh - bateriaActualKwh);
-    const poolCompleto = [...disponiblesHoy, ...disponiblesManana];
-    const opcionCargaCompleta = calc.seleccionaHorasMasBaratas(poolCompleto, margenKwh, potenciaCargaKw);
+    const opcionCargaCompleta = calc.seleccionaHorasMasBaratas(pool, margenKwh, potenciaCargaKw);
     opcionCargaCompleta.bloques = calc.agrupaBloques(opcionCargaCompleta.horasUsadas);
     const diasQueCubre = kwhDiaMedio > 0 && opcionCargaCompleta.energiaCubiertaKwh > 0 ? Number((opcionCargaCompleta.energiaCubiertaKwh / kwhDiaMedio).toFixed(1)) : 0;
 
@@ -609,8 +615,8 @@ router.post("/notify/nightly", async (req, res) => {
     const lineas = [];
 
     const { mananaDisponible, disponiblesHoy, disponiblesManana } = await calculaHorasCandidatas({ ventana, potenciaCargaKw });
-    const poolNecesario = disponiblesManana.length > 0 ? disponiblesManana : disponiblesHoy;
-    const rec = calc.seleccionaHorasMasBaratas(poolNecesario, kwhDiaMedio, potenciaCargaKw);
+    const pool = [...disponiblesHoy, ...disponiblesManana];
+    const rec = calc.seleccionaHorasMasBaratas(pool, kwhDiaMedio, potenciaCargaKw);
 
     if (rec.horasUsadas.length > 0) {
       lineas.push(

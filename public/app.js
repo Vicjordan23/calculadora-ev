@@ -1,8 +1,10 @@
 const fmtEur = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
 const fmtEur3 = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €`);
 
-let chartHoy, chartManana, chartEvolucionDiesel, chartEvolucionElectrico;
+let chartPrecios, chartEvolucionDiesel, chartEvolucionElectrico;
 let ultimoPrecioDiesel = null;
+let ultimoPlan = null;
+let diaActual = "hoy";
 
 async function api(path, options) {
   const res = await fetch(`/api${path}`, {
@@ -14,17 +16,26 @@ async function api(path, options) {
   return data;
 }
 
-function pintaGraficoHoras(canvasId, chartRef, horas, colorHex) {
+function horasRecomendadasParaFecha(fecha) {
+  if (!ultimoPlan) return new Set();
+  const opcion = ultimoPlan.recomendacion === "completa" ? ultimoPlan.opcionCargaCompleta : ultimoPlan.opcionSoloNecesario;
+  if (!opcion) return new Set();
+  return new Set(opcion.horasUsadas.filter((h) => (h.fecha || diaActualFecha("hoy")) === fecha).map((h) => h.hora));
+}
+
+function pintaGraficoHoras(canvasId, chartRef, horas, fecha) {
   const ctx = document.getElementById(canvasId);
   const labels = horas.map((h) => `${String(h.hora).padStart(2, "0")}h`);
   const valores = horas.map((h) => h.precioEurKwh);
+  const recomendadas = horasRecomendadasParaFecha(fecha);
+  const colores = horas.map((h) => (recomendadas.has(h.hora) ? "#4ae08c" : "#4ac0e0"));
 
   if (chartRef) chartRef.destroy();
   return new Chart(ctx, {
     type: "bar",
     data: {
       labels,
-      datasets: [{ label: "€/kWh", data: valores, backgroundColor: colorHex, borderRadius: 4 }],
+      datasets: [{ label: "€/kWh", data: valores, backgroundColor: colores, borderRadius: 4 }],
     },
     options: {
       responsive: true,
@@ -35,6 +46,34 @@ function pintaGraficoHoras(canvasId, chartRef, horas, colorHex) {
       },
     },
   });
+}
+
+function diaActualFecha(dia) {
+  const d = new Date();
+  if (dia === "ayer") d.setDate(d.getDate() - 1);
+  if (dia === "manana") d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString("sv-SE"); // formato YYYY-MM-DD en la zona horaria local del navegador
+}
+
+async function cargaGraficoDia(dia) {
+  diaActual = dia;
+  document.querySelectorAll(".dia-btn").forEach((btn) => btn.classList.toggle("activo", btn.dataset.dia === dia));
+
+  const fecha = diaActualFecha(dia);
+  const meta = document.getElementById("chart-precios-meta");
+  try {
+    const data = await api(`/electricity/prices?fecha=${fecha}`);
+    chartPrecios = pintaGraficoHoras("chart-precios", chartPrecios, data.horas, fecha);
+    meta.textContent = `PVPC ${fecha}`;
+  } catch (err) {
+    if (chartPrecios) {
+      chartPrecios.destroy();
+      chartPrecios = null;
+    }
+    const nombreDia = { ayer: "ayer", hoy: "hoy", manana: "mañana" }[dia] || dia;
+    const razon = dia === "manana" ? "aún no se ha publicado (disponible sobre las 20:30)" : "no disponible";
+    meta.textContent = `Precio de ${nombreDia} ${razon}.`;
+  }
 }
 
 async function cargaResumen() {
@@ -57,7 +96,6 @@ async function cargaResumen() {
   if (data.electricidadHoy) {
     document.getElementById("elec-precio").textContent = fmtEur3(data.electricidadHoy.precioMedioEurKwh);
     document.getElementById("elec-meta").textContent = `PVPC ${data.electricidadHoy.fecha}`;
-    chartHoy = pintaGraficoHoras("chart-hoy", chartHoy, data.electricidadHoy.horas, "#4ac0e0");
   }
   if (data.resumenElectrico) {
     document.getElementById("elec-kwh").textContent = `${data.resumenElectrico.kwhDia} kWh`;
@@ -89,19 +127,6 @@ async function cargaResumen() {
   document.getElementById(
     "rec-hint"
   ).textContent = `Solo cuentan las horas en las que realmente podrías cargar en casa (de ${String(s.electrico.horaLlegadaCasa).padStart(2, "0")}:00 a ${String(s.electrico.horaSalidaTrabajo).padStart(2, "0")}:00 entre semana; el fin de semana entero), repartiendo la energía a ${s.electrico.potenciaCargaKw} kW — nunca se carga todo en una hora.`;
-}
-
-async function cargaGraficoManana() {
-  try {
-    const manana = new Date();
-    manana.setDate(manana.getDate() + 1);
-    const fecha = manana.toISOString().slice(0, 10);
-    const data = await api(`/electricity/prices?fecha=${fecha}`);
-    document.getElementById("panel-manana").style.display = "block";
-    chartManana = pintaGraficoHoras("chart-manana", chartManana, data.horas, "#6d8dff");
-  } catch (err) {
-    document.getElementById("panel-manana").style.display = "none";
-  }
 }
 
 function formatoBloques(bloques) {
@@ -169,11 +194,13 @@ async function recomendar(bateriaActualPct) {
         titulo: `Cargar al máximo ahora (hasta 100%)`,
         opcion: data.opcionCargaCompleta,
         recomendada: data.recomendacion === "completa",
-        extra: data.diasQueCubre ? `<div class="detalle-linea">Cubriría ~${data.diasQueCubre} días de conducción</div>` : "",
+        extra: data.diasQueCubre ? `<div class="detalle-linea">Cubriría ~${data.diasQueCubre} ${data.diasQueCubre === 1 ? "día" : "días"} de conducción</div>` : "",
       })}
     </div>`;
 
     resultado.innerHTML = html;
+    ultimoPlan = data;
+    cargaGraficoDia(diaActual); // repinta el grafico activo con las horas recomendadas resaltadas
   } catch (err) {
     resultado.innerHTML = `<div class="recomendacion"><div class="err">${err.message}</div></div>`;
   }
@@ -306,6 +333,10 @@ function initFormularios() {
   document.getElementById("form-recomendar").addEventListener("submit", (e) => {
     e.preventDefault();
     recomendar(document.getElementById("rec-bateria").value);
+  });
+
+  document.querySelectorAll(".dia-btn").forEach((btn) => {
+    btn.addEventListener("click", () => cargaGraficoDia(btn.dataset.dia));
   });
 
   document.querySelectorAll('input[name="carga-tipo"]').forEach((radio) => {
@@ -556,7 +587,7 @@ if ("serviceWorker" in navigator) {
 
 initFormularios();
 cargaResumen();
-cargaGraficoManana();
+cargaGraficoDia("hoy");
 cargaTablaCargas();
 cargaTablaRepostajes();
 cargaEvolucion();

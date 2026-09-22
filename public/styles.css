@@ -237,6 +237,37 @@ code {
   font-size: 0.85rem;
 }
 
+.dia-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.dia-btn { margin-top: 0; }
+.dia-btn.activo {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.leyenda-chart {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.muestra {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+.muestra-normal { background: #4ac0e0; }
+.muestra-recomendada { background: #4ae08c; }
+
 .plan-opciones {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
