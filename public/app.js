@@ -201,15 +201,31 @@ function tarjetaOpcion({ titulo, opcion, recomendada, extra }) {
   `;
 }
 
-async function recomendar(bateriaActualPct) {
+let mananaPollTimer = null;
+let mananaPollIntentos = 0;
+const MANANA_POLL_INTERVALO_MS = 60000;
+const MANANA_POLL_MAX_INTENTOS = 15; // ~15 minutos cubriendo publicaciones tardias de la REE
+
+async function recomendar(bateriaActualPct, esReintento = false) {
+  if (mananaPollTimer) {
+    clearTimeout(mananaPollTimer);
+    mananaPollTimer = null;
+  }
+  if (!esReintento) mananaPollIntentos = 0;
+
   const resultado = document.getElementById("recomendacion-resultado");
-  resultado.innerHTML = "Calculando...";
+  if (!esReintento) resultado.innerHTML = "Calculando...";
   try {
     const data = await api(`/recommend?bateriaActualPct=${bateriaActualPct}`);
 
     let html = "";
     if (!data.mananaDisponible) {
       html += `<div class="recomendacion"><div class="warn">⚠️ <strong>Provisional hasta las 20:30.</strong> ${data.avisoManana}</div></div>`;
+      if (mananaPollIntentos < MANANA_POLL_MAX_INTENTOS) {
+        mananaPollIntentos++;
+        html += `<div class="recomendacion"><div class="fetch-meta">🔄 Comprobando otra vez en 1 min si ya se han publicado los precios de mañana (intento ${mananaPollIntentos}/${MANANA_POLL_MAX_INTENTOS})… deja esta página abierta.</div></div>`;
+        mananaPollTimer = setTimeout(() => recomendar(bateriaActualPct, true), MANANA_POLL_INTERVALO_MS);
+      }
     }
 
     if (data.tipEsperarFinde) {

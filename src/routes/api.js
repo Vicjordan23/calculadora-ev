@@ -98,12 +98,27 @@ router.get("/diesel/history", async (req, res) => {
 
 // ---------- Precios electricidad (PVPC) ----------
 
+async function conReintentos(fn, intentos = 3, esperaMs = 1500) {
+  let ultimoError;
+  for (let i = 0; i < intentos; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      ultimoError = err;
+      if (i < intentos - 1) await new Promise((r) => setTimeout(r, esperaMs));
+    }
+  }
+  throw ultimoError;
+}
+
 async function obtenerPreciosDia(fecha) {
   const cache = await store.getElectricityForDate(fecha);
   // Si la cache tiene menos de 20 horas es que algo salio mal en un fetch
   // anterior (dato incompleto): mejor reintentar que quedarnos con eso.
   if (cache && Array.isArray(cache.horas) && cache.horas.length >= 20) return cache;
-  const precios = await fetchElectricityPrices(new Date(fecha + "T12:00:00"));
+  // Un fallo puntual de red o un cold-start del servidor no deberia dejarte
+  // sin recomendacion: reintenta un par de veces antes de rendirse.
+  const precios = await conReintentos(() => fetchElectricityPrices(new Date(fecha + "T12:00:00")));
   return store.saveElectricityPrices(precios);
 }
 
