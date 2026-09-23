@@ -67,9 +67,11 @@ Como Render gratis se duerme, necesitamos que algo externo llame a la app a las 
    - **Horario**: todos los días a las **07:05** y otra vez a las **14:05**  (puedes crear dos cron jobs o uno con ambas horas si el plan lo permite)
 3. Crea otro cron job:
    - **Título**: Refrescar PVPC de mañana
-   - **URL**: `https://calculadora-ev.onrender.com/api/electricity/refresh`
+   - **URL**: `https://calculadora-ev.onrender.com/api/electricity/refresh-manana`
    - **Método**: POST
    - **Horario**: **20:35** y otra vez a las **21:00** (por si Red Eléctrica publica un poco tarde)
+
+   ⚠️ Importante: la URL termina en `/refresh-manana`, no en `/refresh` a secas — esa otra siempre refresca el precio de **hoy**, no el de mañana, que es justo el que necesitas tener listo antes de las 20:31.
 
 Con esto, aunque tú no abras la app, los precios se mantienen actualizados solos.
 

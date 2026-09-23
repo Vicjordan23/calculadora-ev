@@ -86,9 +86,12 @@ router.get("/diesel/price", async (req, res) => {
 
 router.post("/diesel/refresh", async (req, res) => {
   try {
-    res.json(await obtenerPrecioDieselFresco());
+    const precio = await obtenerPrecioDieselFresco();
+    // Respuesta minima a proposito: la usan crons externos (cron-job.org)
+    // que a veces marcan como "fallido" una respuesta de varios KB.
+    res.json({ ok: true, fechaPublicacion: precio.fechaPublicacion, precioPorLitro: precio.precioPorLitro });
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    res.status(502).json({ ok: false, error: err.message });
   }
 });
 
@@ -135,9 +138,27 @@ router.post("/electricity/refresh", async (req, res) => {
   const fecha = req.query.fecha || fechaISO(0);
   try {
     const precios = await fetchElectricityPrices(new Date(fecha + "T12:00:00"));
-    res.json(await store.saveElectricityPrices(precios));
+    const guardado = await store.saveElectricityPrices(precios);
+    // Respuesta minima: la usan crons externos que marcan como "fallido"
+    // una respuesta de varios KB (esta llevaba las 24 horas completas).
+    res.json({ ok: true, fecha: guardado.fecha, horas: guardado.horas.length });
   } catch (err) {
-    res.status(502).json({ error: err.message, fecha });
+    res.status(502).json({ ok: false, error: err.message, fecha });
+  }
+});
+
+// Endpoint dedicado para el cron externo de las 20:35/21:00: SIEMPRE pide
+// manana, pase lo que pase (no depende de un ?fecha= que un cron externo
+// no puede calcular solo). El generico de arriba, sin parametros, refresca
+// HOY -- por eso hacia falta este aparte.
+router.post("/electricity/refresh-manana", async (req, res) => {
+  const fecha = fechaISO(1);
+  try {
+    const precios = await conReintentos(() => fetchElectricityPrices(new Date(fecha + "T12:00:00")));
+    const guardado = await store.saveElectricityPrices(precios);
+    res.json({ ok: true, fecha: guardado.fecha, horas: guardado.horas.length });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message, fecha });
   }
 });
 
