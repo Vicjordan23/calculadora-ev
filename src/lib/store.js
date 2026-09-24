@@ -114,6 +114,21 @@ async function saveElectricityPrices(dayResult) {
   return dayResult;
 }
 
+// Registro de los ultimos intentos reales de descarga de precios PVPC (no
+// cuenta los aciertos de cache), para poder ver a que hora empiezan a estar
+// disponibles los precios de manana y que responde cada fuente.
+const MAX_INTENTOS_PVPC = 40;
+
+async function registraIntentoPvpc(intento) {
+  const log = (await getKv("pvpcFetchLog")) || [];
+  log.push({ ts: new Date().toISOString(), ...intento });
+  await setKv("pvpcFetchLog", log.slice(-MAX_INTENTOS_PVPC));
+}
+
+async function getIntentosPvpc() {
+  return (await getKv("pvpcFetchLog")) || [];
+}
+
 async function getElectricityHistory() {
   await init();
   const res = await client.execute(
@@ -246,6 +261,8 @@ module.exports = {
   getElectricityForDate,
   saveElectricityPrices,
   getElectricityHistory,
+  registraIntentoPvpc,
+  getIntentosPvpc,
   getElectricityCacheAll,
   getCharges,
   addCharge,

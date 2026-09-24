@@ -23,13 +23,34 @@ function parsePrecio(valor) {
   return Number.isFinite(n) ? n : null;
 }
 
-async function fetchDieselPrice() {
-  const res = await fetch(MINETUR_URL, { headers: { Accept: "application/json" } });
+// La lista de TODA Espana pesa ~12 MB: en Render gratis (CPU muy limitada)
+// tardaba 37-50 s en descargarse y procesarse, mas que el timeout de 30 s
+// de cron-job.org. Las dos provincias que nos interesan (Guadalajara=19 y
+// Alcala de Henares, que es de Madrid=28) pesan ~1 MB en total.
+const PROVINCIAS_OBJETIVO = ["19", "28"];
+const TIMEOUT_MS = 20000;
+
+async function pideJson(url) {
+  const res = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Fallo al consultar precios de carburantes: HTTP ${res.status}`);
   }
-  const data = await res.json();
-  const lista = data.ListaEESSPrecio || [];
+  return res.json();
+}
+
+async function pideEstaciones() {
+  try {
+    const respuestas = await Promise.all(PROVINCIAS_OBJETIVO.map((p) => pideJson(`${MINETUR_URL}FiltroProvincia/${p}`)));
+    return { fecha: respuestas[0].Fecha, lista: respuestas.flatMap((r) => r.ListaEESSPrecio || []) };
+  } catch (err) {
+    // Si el filtro por provincia falla, se recurre a la lista completa (mas lenta).
+    const data = await pideJson(MINETUR_URL);
+    return { fecha: data.Fecha, lista: data.ListaEESSPrecio || [] };
+  }
+}
+
+async function fetchDieselPrice() {
+  const { fecha, lista } = await pideEstaciones();
 
   const estaciones = lista
     .filter((e) => normaliza(e["Rótulo"]).includes(MARCA_OBJETIVO))
@@ -54,7 +75,7 @@ async function fetchDieselPrice() {
   const precioMinimo = Math.min(...precios);
 
   return {
-    fechaPublicacion: data.Fecha,
+    fechaPublicacion: fecha,
     fetchedAt: new Date().toISOString(),
     precioPorLitro: Number(precioMedio.toFixed(3)),
     precioMinimo: Number(precioMinimo.toFixed(3)),

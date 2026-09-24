@@ -101,6 +101,8 @@ router.get("/diesel/history", async (req, res) => {
 
 // ---------- Precios electricidad (PVPC) ----------
 
+// Reintenta solo los fallos tecnicos (red, timeouts...). Un "todavia no esta
+// publicado" (err.noPublicado) no se arregla reintentando al segundo.
 async function conReintentos(fn, intentos = 3, esperaMs = 1500) {
   let ultimoError;
   for (let i = 0; i < intentos; i++) {
@@ -108,22 +110,52 @@ async function conReintentos(fn, intentos = 3, esperaMs = 1500) {
       return await fn();
     } catch (err) {
       ultimoError = err;
+      if (err.noPublicado) break;
       if (i < intentos - 1) await new Promise((r) => setTimeout(r, esperaMs));
     }
   }
   throw ultimoError;
 }
 
-async function obtenerPreciosDia(fecha) {
+// Para no machacar a REE cuando la pagina esta reintentando cada minuto:
+// tras un "aun no publicado" no se vuelve a preguntar por esa fecha en 45 s.
+const noPublicadoHasta = new Map();
+const ESPERA_TRAS_NO_PUBLICADO_MS = 45000;
+
+async function obtenerPreciosDia(fecha, { forzar = false } = {}) {
   const cache = await store.getElectricityForDate(fecha);
   // Si la cache tiene menos de 20 horas es que algo salio mal en un fetch
   // anterior (dato incompleto): mejor reintentar que quedarnos con eso.
   if (cache && Array.isArray(cache.horas) && cache.horas.length >= 20) return cache;
-  // Un fallo puntual de red o un cold-start del servidor no deberia dejarte
-  // sin recomendacion: reintenta un par de veces antes de rendirse.
-  const precios = await conReintentos(() => fetchElectricityPrices(new Date(fecha + "T12:00:00")));
-  return store.saveElectricityPrices(precios);
+
+  if (!forzar && (noPublicadoHasta.get(fecha) || 0) > Date.now()) {
+    const err = new Error(`Precios PVPC de ${fecha} aun no publicados`);
+    err.noPublicado = true;
+    throw err;
+  }
+
+  try {
+    const precios = await conReintentos(() => fetchElectricityPrices(new Date(fecha + "T12:00:00")));
+    noPublicadoHasta.delete(fecha);
+    await store.registraIntentoPvpc({ fecha, ok: true, fuente: precios.fuente });
+    return await store.saveElectricityPrices(precios);
+  } catch (err) {
+    if (err.noPublicado) noPublicadoHasta.set(fecha, Date.now() + ESPERA_TRAS_NO_PUBLICADO_MS);
+    await store.registraIntentoPvpc({ fecha, ok: false, noPublicado: !!err.noPublicado, error: err.message }).catch(() => {});
+    throw err;
+  }
 }
+
+// Ligero, para pings de keep-alive.
+router.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+// Ultimos intentos de descarga de precios PVPC (cuando y que respondio la
+// fuente), para ver a que hora aparecen de verdad los precios de manana.
+router.get("/electricity/diagnostico", async (req, res) => {
+  res.json({ ahora: new Date().toISOString(), intentos: await store.getIntentosPvpc() });
+});
 
 router.get("/electricity/prices", async (req, res) => {
   const fecha = req.query.fecha || fechaISO(0);
@@ -151,13 +183,23 @@ router.post("/electricity/refresh", async (req, res) => {
 // manana, pase lo que pase (no depende de un ?fecha= que un cron externo
 // no puede calcular solo). El generico de arriba, sin parametros, refresca
 // HOY -- por eso hacia falta este aparte.
+//
+// Pensado para ejecutarse VARIAS veces cada tarde (p.ej. cada 10 min entre
+// las 20:00 y las 23:50): si ya tiene los precios guardados no vuelve a
+// pedirlos, y si aun no estan publicados responde 200 con ok:false (no es un
+// fallo del cronjob: cron-job.org desactiva los jobs con muchos fallos).
+// Solo un error tecnico real (red, base de datos...) devuelve 5xx.
 router.post("/electricity/refresh-manana", async (req, res) => {
   const fecha = fechaISO(1);
   try {
-    const precios = await conReintentos(() => fetchElectricityPrices(new Date(fecha + "T12:00:00")));
-    const guardado = await store.saveElectricityPrices(precios);
-    res.json({ ok: true, fecha: guardado.fecha, horas: guardado.horas.length });
+    const yaGuardado = await store.getElectricityForDate(fecha);
+    if (yaGuardado && Array.isArray(yaGuardado.horas) && yaGuardado.horas.length >= 20) {
+      return res.json({ ok: true, fecha, horas: yaGuardado.horas.length, yaGuardado: true });
+    }
+    const guardado = await obtenerPreciosDia(fecha, { forzar: true });
+    res.json({ ok: true, fecha, horas: guardado.horas.length, fuente: guardado.fuente || null });
   } catch (err) {
+    if (err.noPublicado) return res.json({ ok: false, fecha, motivo: "aun no publicado" });
     res.status(502).json({ ok: false, error: err.message, fecha });
   }
 });

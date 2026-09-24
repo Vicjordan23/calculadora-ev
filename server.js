@@ -12,7 +12,6 @@ const cron = require("node-cron");
 const apiRouter = require("./src/routes/api");
 const store = require("./src/lib/store");
 const { fetchDieselPrice } = require("./src/fetchers/diesel");
-const { fetchElectricityPrices, toDateParam } = require("./src/fetchers/electricity");
 
 const PORT = process.env.PORT || 3000;
 
@@ -42,17 +41,16 @@ cron.schedule(
   { timezone: "Europe/Madrid" }
 );
 
-// Electricidad: el precio del dia siguiente se publica sobre las 20:30.
-// Reintentamos a las 20:35 y, por si acaso, otra vez a las 21:00.
+// Electricidad: el precio del dia siguiente se publica sobre las 20:15-20:30.
+// Se intenta cada 10 min entre las 20:00 y las 23:50; el endpoint no vuelve
+// a pedir nada en cuanto ya tiene los precios de manana guardados.
 cron.schedule(
-  "35 20,21 * * *",
+  "*/10 20-23 * * *",
   async () => {
     try {
-      const manana = new Date();
-      manana.setDate(manana.getDate() + 1);
-      const precios = await fetchElectricityPrices(manana);
-      await store.saveElectricityPrices(precios);
-      console.log(`[cron] Precios PVPC de manana (${toDateParam(manana)}) guardados.`);
+      const res = await fetch(`http://localhost:${PORT}/api/electricity/refresh-manana`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok && !data.yaGuardado) console.log(`[cron] Precios PVPC de manana (${data.fecha}) guardados (${data.fuente}).`);
     } catch (err) {
       console.error("[cron] Error actualizando precios PVPC de manana:", err.message);
     }
