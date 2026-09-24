@@ -204,7 +204,15 @@ function tarjetaOpcion({ titulo, opcion, recomendada, extra }) {
 let mananaPollTimer = null;
 let mananaPollIntentos = 0;
 const MANANA_POLL_INTERVALO_MS = 60000;
-const MANANA_POLL_MAX_INTENTOS = 15; // ~15 minutos cubriendo publicaciones tardias de la REE
+const MANANA_POLL_MAX_INTENTOS = 180; // hasta ~3 h, pero solo dentro de la ventana 20:00-23:59
+const INICIO_PUBLICACION_MIN = 20 * 60; // REE publica los precios de mañana sobre las 20:15-20:45
+
+// Minutos desde medianoche en hora de España (no la del navegador), para que
+// la ventana de comprobacion sea correcta aunque el movil este en otra zona.
+function minutosEnMadrid() {
+  const partes = new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+  return Number(partes.find((p) => p.type === "hour").value) * 60 + Number(partes.find((p) => p.type === "minute").value);
+}
 
 async function recomendar(bateriaActualPct, esReintento = false) {
   if (mananaPollTimer) {
@@ -221,9 +229,15 @@ async function recomendar(bateriaActualPct, esReintento = false) {
     let html = "";
     if (!data.mananaDisponible) {
       html += `<div class="recomendacion"><div class="warn">⚠️ <strong>Provisional hasta las 20:30.</strong> ${data.avisoManana}</div></div>`;
-      if (mananaPollIntentos < MANANA_POLL_MAX_INTENTOS) {
+      const ahora = minutosEnMadrid();
+      if (ahora < INICIO_PUBLICACION_MIN) {
+        // Antes de las 20:00 no hay nada que comprobar: REE aun no ha publicado.
+        // Se programa una unica comprobacion para cuando empiece la ventana.
+        html += `<div class="recomendacion"><div class="fetch-meta">⏳ Los precios de mañana se publican sobre las 20:30. Si dejas esta página abierta, empezará a comprobarlo sola a partir de las 20:00.</div></div>`;
+        mananaPollTimer = setTimeout(() => recomendar(bateriaActualPct, true), (INICIO_PUBLICACION_MIN - ahora) * 60000 + 5000);
+      } else if (mananaPollIntentos < MANANA_POLL_MAX_INTENTOS) {
         mananaPollIntentos++;
-        html += `<div class="recomendacion"><div class="fetch-meta">🔄 Comprobando otra vez en 1 min si ya se han publicado los precios de mañana (intento ${mananaPollIntentos}/${MANANA_POLL_MAX_INTENTOS})… deja esta página abierta.</div></div>`;
+        html += `<div class="recomendacion"><div class="fetch-meta">🔄 Comprobando cada minuto si ya se han publicado los precios de mañana (intento ${mananaPollIntentos})… deja esta página abierta.</div></div>`;
         mananaPollTimer = setTimeout(() => recomendar(bateriaActualPct, true), MANANA_POLL_INTERVALO_MS);
       }
     }
