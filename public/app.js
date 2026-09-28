@@ -1,7 +1,7 @@
 const fmtEur = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
 const fmtEur3 = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €`);
 
-let chartPrecios, chartEvolucionDiesel, chartEvolucionElectrico, chartComparativaMensual;
+let chartPrecios, chartEvolucionDiesel, chartEvolucionElectrico, chartComparativaMensual, chartAhorroAcumulado;
 let ultimoPrecioDiesel = null;
 let ultimoPlan = null;
 let diaActual = "hoy";
@@ -186,18 +186,45 @@ function pintaSemanaCarga(r, elecSettings) {
   dias.push({ nombre: "SÁB ⚡", pct: 100, carga: true });
   dias.push({ nombre: "DOM ⚡", pct: 100, carga: true });
 
+  // JS getDay(): 0=domingo..6=sabado -> indice en `dias` (0=lunes..6=domingo).
+  const hoyIdx = [6, 0, 1, 2, 3, 4, 5][new Date().getDay()];
+  if (hoyIdx < 5 && r.bateriaEstimadaPct != null) dias[hoyIdx].pct = r.bateriaEstimadaPct;
+
   const colorPara = (p, carga) => (carga ? "#4ae08c" : p <= 20 ? "#e0a24a" : p <= 50 ? "#4ac0e0" : "#4ae08c");
 
   document.getElementById("semana-tira").innerHTML = dias
     .map(
-      (d) => `
-    <div class="semana-dia">
-      <div class="nombre">${d.nombre}</div>
+      (d, i) => `
+    <div class="semana-dia${i === hoyIdx ? " hoy" : ""}">
+      <div class="nombre">${d.nombre}${i === hoyIdx ? " · hoy" : ""}</div>
       <div class="semana-barra"><div class="relleno" style="height:${d.pct}%; background:${colorPara(d.pct, d.carga)};"></div></div>
       <div class="pct">${d.pct}%</div>
     </div>`
     )
     .join("");
+
+  const bateriaHoyDiv = document.getElementById("bateria-hoy");
+  if (r.bateriaEstimadaPct != null) {
+    bateriaHoyDiv.innerHTML = `
+      <span class="valor">🔋 ${r.bateriaEstimadaPct}%</span>
+      <span class="detalle">estimada hoy · ${r.diasDesdeUltimaCarga} día${r.diasDesdeUltimaCarga === 1 ? "" : "s"} de conducción desde la última carga completa (no hay integración con el coche, es una estimación)</span>
+    `;
+  } else {
+    bateriaHoyDiv.innerHTML = "";
+  }
+
+  // Aviso "toca cargar": solo tiene sentido viernes/sabado/domingo (que es
+  // cuando de verdad se puede enchufar) y si la bateria estimada ya esta
+  // baja -- entre semana no hay nada que hacer.
+  const diaSemanaHoy = new Date().getDay(); // 0=dom, 5=vie, 6=sab
+  const esFindeOVispera = diaSemanaHoy === 5 || diaSemanaHoy === 6 || diaSemanaHoy === 0;
+  const avisoDiv = document.getElementById("aviso-carga");
+  if (esFindeOVispera && r.bateriaEstimadaPct != null && r.bateriaEstimadaPct <= r.bateriaMinPct + 20) {
+    avisoDiv.classList.remove("oculto");
+    avisoDiv.innerHTML = `⚡ <strong>Te toca cargar este fin de semana.</strong> Batería estimada ~${r.bateriaEstimadaPct}%, previsión ~${fmtEur(r.costeSemana)} para llenarla al mejor precio.`;
+  } else {
+    avisoDiv.classList.add("oculto");
+  }
 
   const f = r.ultimoFinde;
   document.getElementById("semana-resumen").innerHTML = `
@@ -205,6 +232,7 @@ function pintaSemanaCarga(r, elecSettings) {
     <div class="item"><span>Energía del último finde</span><strong>${f.kwh} kWh</strong></div>
     <div class="item"><span>Precio medio</span><strong>${fmtEur3(f.precioMedioEurKwh)}/kWh</strong></div>
     <div class="item"><span>Coste del finde</span><strong>${fmtEur(f.costeTotal)}</strong></div>
+    <div class="item"><span>Previsión próximo finde</span><strong>${fmtEur(r.costeSemana)} <span style="font-weight:400;color:var(--text-dim);font-size:0.75em;">(media de ${r.muestrasProyeccion} finde${r.muestrasProyeccion === 1 ? "" : "s"})</span></strong></div>
   `;
 }
 
@@ -258,6 +286,7 @@ async function cargaComparativa() {
       try {
         const dieselMensual = await api("/diesel/evolution");
         pintaGraficoComparativaMensual(dieselMensual, data.evolucionMensualElectricoReal);
+        pintaGraficoAhorroAcumulado(dieselMensual, data.evolucionMensualElectricoReal);
       } catch (err) {
         /* silencioso: el hero ya tiene los totales */
       }
@@ -289,6 +318,46 @@ function pintaGraficoComparativaMensual(dieselMensual, electricoMensual) {
       scales: {
         x: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" } },
         y: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+function pintaGraficoAhorroAcumulado(dieselMensual, electricoMensual) {
+  const meses = [...new Set([...dieselMensual.map((d) => d.mes), ...electricoMensual.map((d) => d.mes)])].sort();
+  const dieselPorMes = Object.fromEntries(dieselMensual.map((d) => [d.mes, d.real]));
+  const electricoPorMes = Object.fromEntries(electricoMensual.map((d) => [d.mes, d.real]));
+
+  let acumulado = 0;
+  const serie = meses.map((m) => {
+    acumulado += (dieselPorMes[m] ?? 0) - (electricoPorMes[m] ?? 0);
+    return Number(acumulado.toFixed(2));
+  });
+
+  const ctx = document.getElementById("chart-ahorro-acumulado");
+  if (chartAhorroAcumulado) chartAhorroAcumulado.destroy();
+  chartAhorroAcumulado = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: meses,
+      datasets: [
+        {
+          label: "Ahorro acumulado",
+          data: serie,
+          borderColor: "#4ae08c",
+          backgroundColor: "rgba(74, 224, 140, 0.15)",
+          fill: true,
+          tension: 0.25,
+          pointBackgroundColor: "#4ae08c",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" } },
+        y: { ticks: { color: "#9aa1ac", callback: (v) => `${v} €` }, grid: { color: "#2a2f3a" } },
       },
     },
   });
@@ -678,6 +747,29 @@ function initFormularios() {
       }),
     });
     cargaResumen();
+  });
+
+  document.getElementById("btn-export-backup").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const btn = e.target;
+    const textoOriginal = btn.textContent;
+    btn.textContent = "Generando…";
+    btn.disabled = true;
+    try {
+      const data = await api("/export");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `calculadora-ev-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      btn.textContent = textoOriginal;
+      btn.disabled = false;
+    }
   });
 
   document.getElementById("btn-csv-repostajes").addEventListener("click", async (e) => {

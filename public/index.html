@@ -47,6 +47,8 @@
     </div>
     <div class="fetch-meta" id="comp-meta"></div>
     <canvas id="chart-comparativa-mensual" height="90" style="margin-top:16px"></canvas>
+    <p class="hint" style="margin-top:18px">Ahorro acumulado mes a mes desde tu primer repostaje.</p>
+    <canvas id="chart-ahorro-acumulado" height="80"></canvas>
   </section>
 
   <section class="panel" id="panel-repostajes">
@@ -171,6 +173,8 @@
   <section class="panel oculto" id="panel-semana-carga">
     <h2>🗓️ Tu semana de carga</h2>
     <p class="hint">Batería al 100% el lunes, bajando con cada trayecto, y recarga completa el fin de semana con las horas más baratas de ese finde en concreto.</p>
+    <div class="bateria-hoy" id="bateria-hoy"></div>
+    <div class="aviso-carga oculto" id="aviso-carga"></div>
     <div class="semana-tira" id="semana-tira"></div>
     <div class="semana-resumen" id="semana-resumen"></div>
   </section>
@@ -323,6 +327,12 @@
       </fieldset>
       <button type="submit" class="btn-primary">Guardar ajustes</button>
     </form>
+  </section>
+
+  <section class="panel">
+    <h2>💾 Copia de seguridad</h2>
+    <p class="hint">Descarga un único archivo con tus ajustes, repostajes, cargas y el histórico de precios ya guardado (incluido el del backfill), por si quieres guardarlo aparte o migrar de base de datos.</p>
+    <button class="btn-secondary" id="btn-export-backup">Exportar todo (JSON)</button>
   </section>
 
   <footer>

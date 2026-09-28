@@ -389,15 +389,35 @@ code {
   margin-top: 10px;
 }
 
+.bateria-hoy {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 8px;
+}
+.bateria-hoy .valor { font-size: 2rem; font-weight: 800; color: var(--electrico); }
+.bateria-hoy .detalle { color: var(--text-dim); font-size: 0.82rem; }
+
+.aviso-carga {
+  margin-top: 12px;
+  background: rgba(74, 224, 140, 0.1);
+  border: 1px solid var(--ahorro);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+}
+
 .semana-tira {
   display: flex;
   gap: 10px;
   background: var(--panel-2);
   border-radius: 12px;
   padding: 18px 16px 12px;
-  margin-top: 10px;
+  margin-top: 14px;
 }
 .semana-dia { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.semana-dia.hoy .nombre { color: var(--accent); }
+.semana-dia.hoy .semana-barra { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .semana-dia .nombre { font-size: 0.72rem; color: var(--text-dim); font-weight: 600; }
 .semana-barra { width: 26px; height: 130px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; position: relative; overflow: hidden; }
 .semana-barra .relleno { position: absolute; bottom: 0; left: 0; right: 0; border-radius: 0 0 5px 5px; }

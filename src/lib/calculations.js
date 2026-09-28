@@ -159,6 +159,23 @@ function diaSemanaUTC(fechaISO) {
 }
 
 /**
+ * Cuenta los dias laborables (lunes a viernes) entre `desdeExclusiva`
+ * (sin contar ese dia) y `hastaInclusive` (contando ese dia). Sirve para
+ * estimar cuanta bateria se ha gastado desde la ultima carga completa del
+ * domingo hasta hoy, contando solo dias de conduccion real.
+ */
+function diasLaborablesEntre(desdeExclusiva, hastaInclusive) {
+  let cursor = sumaDiasISO(desdeExclusiva, 1);
+  let count = 0;
+  while (cursor <= hastaInclusive) {
+    const dow = diaSemanaUTC(cursor);
+    if (dow !== 0 && dow !== 6) count++;
+    cursor = sumaDiasISO(cursor, 1);
+  }
+  return count;
+}
+
+/**
  * Horas (0-23) en las que se puede cargar en casa ese dia concreto, dada
  * la ventana real disponible: entre semana solo fuera del horario de
  * trabajo (desde que llegas a casa hasta que sales al dia siguiente); los
@@ -342,6 +359,7 @@ module.exports = {
   sumaDiasISO,
   evolucionMensual,
   diaSemanaUTC,
+  diasLaborablesEntre,
   horasPermitidasEnDia,
   precioHistoricoPorDiaSemana,
   agrupaBloques,

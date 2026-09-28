@@ -350,6 +350,21 @@ router.get("/summary", async (req, res) => {
       if (finde) {
         const kmSemana = settings.electrico.kmDiaMedio * settings.diasConduccionSemana;
         const costeDiaMedioSemana = finde.costeSemana / 7; // para escalar mes/año como el resto de la app
+
+        // Bateria estimada "hoy": desde el domingo de la ultima carga completa
+        // (100%), resta un dia de consumo por cada dia laborable transcurrido
+        // desde entonces. No sabemos la bateria real (no hay integracion con
+        // el coche), pero es una estimacion razonable para avisar de cuando
+        // toca volver a cargar.
+        let bateriaEstimadaPct = null;
+        let diasDesdeUltimaCarga = null;
+        if (finde.ultimoFinde) {
+          const hoy = fechaISO(0);
+          diasDesdeUltimaCarga = calc.diasLaborablesEntre(finde.ultimoFinde.domingo, hoy);
+          const pctPorDiaConduccion = settings.electrico.capacidadBateriaKwh > 0 ? (kwhDiaMedio / settings.electrico.capacidadBateriaKwh) * 100 : 0;
+          bateriaEstimadaPct = Math.max(0, Math.round(100 - diasDesdeUltimaCarga * pctPorDiaConduccion));
+        }
+
         resumenElectrico = {
           estrategia: "findes",
           kwhDia: Number(kwhDiaMedio.toFixed(2)),
@@ -368,6 +383,8 @@ router.get("/summary", async (req, res) => {
           costePorKm: kmSemana > 0 ? Number((finde.costeSemana / kmSemana).toFixed(4)) : null,
           muestrasProyeccion: finde.muestrasFinde,
           ultimoFinde: finde.ultimoFinde,
+          bateriaEstimadaPct,
+          diasDesdeUltimaCarga,
         };
       }
     } else if (electricidadHoy) {
@@ -957,6 +974,36 @@ router.get("/electricity/simulation", async (req, res) => {
         horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
         potenciaCargaKw: settings.electrico.potenciaCargaKw,
       },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- Exportar / backup ----------
+// Copia completa de tus datos (ajustes, repostajes, cargas y el historico de
+// precios ya descargado) en un solo JSON, por si quieres guardarla aparte o
+// migrar de base de datos. No incluye nada que no puedas volver a descargar
+// salvo tus propios repostajes/cargas -- el historico de precios se incluye
+// para no tener que repetir el backfill.
+router.get("/export", async (req, res) => {
+  try {
+    const [settings, dieselFills, charges, dieselHistory, electricityCacheAll] = await Promise.all([
+      store.getSettings(),
+      store.getDieselFills(),
+      store.getCharges(),
+      store.getDieselHistory(),
+      store.getElectricityCacheAll(),
+    ]);
+
+    res.json({
+      exportadoEn: new Date().toISOString(),
+      version: 1,
+      settings,
+      dieselFills,
+      charges,
+      dieselHistory,
+      electricityCacheAll,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
