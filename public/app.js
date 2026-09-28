@@ -93,20 +93,34 @@ async function cargaResumen() {
     document.getElementById("diesel-anio").textContent = fmtEur(data.resumenDiesel.costeAnio);
   }
 
-  if (data.electricidadHoy) {
-    document.getElementById("elec-precio").textContent = fmtEur3(data.electricidadHoy.precioMedioEurKwh);
-  }
   if (data.resumenElectrico) {
-    document.getElementById("elec-kwh").textContent = `${data.resumenElectrico.kwhDia} kWh`;
-    document.getElementById("elec-horas").textContent = `~${data.resumenElectrico.horasNecesarias} h`;
-    document.getElementById("elec-dia").textContent = fmtEur(data.resumenElectrico.costeDia);
-    document.getElementById("elec-mes").textContent = fmtEur(data.resumenElectrico.costeMes);
-    document.getElementById("elec-anio").textContent = fmtEur(data.resumenElectrico.costeAnio);
-    const m = data.resumenElectrico.muestrasProyeccion;
-    document.getElementById("elec-meta").textContent =
-      m > 1
-        ? `€/día con el precio de hoy · mes/año con la media de tus mejores horas de ${m} días`
-        : `PVPC ${data.electricidadHoy?.fecha || ""} · mes/año todavía con solo 1 día de histórico`;
+    const r = data.resumenElectrico;
+    document.getElementById("elec-precio").textContent = fmtEur3(r.precioMedioEurKwh);
+    document.getElementById("elec-dia").textContent = fmtEur(r.costeDia);
+    document.getElementById("elec-mes").textContent = fmtEur(r.costeMes);
+    document.getElementById("elec-anio").textContent = fmtEur(r.costeAnio);
+
+    if (r.estrategia === "findes") {
+      document.getElementById("elec-precio-label").textContent = "€/kWh medio cargando en tus fines de semana más baratos";
+      document.getElementById("elec-kwh-label").textContent = "kWh/semana";
+      document.getElementById("elec-kwh").textContent = `${r.kwhSemana} kWh`;
+      document.getElementById("elec-extra-label").textContent = "Cubre la semana solo con el finde";
+      document.getElementById("elec-extra").textContent = r.cubreSoloConFinde ? "✅ Sí" : `⚠️ Faltan ${r.remanenteKwh} kWh`;
+      document.getElementById("elec-meta").textContent =
+        `Carga concentrada el sáb/dom (batería del ${100 - r.bateriaMinPct}%→100% hasta el ${r.bateriaMinPct}%), ${r.diasConduccionSemana} días de conducción/semana` +
+        (r.muestrasProyeccion > 0 ? ` · media de ${r.muestrasProyeccion} fin${r.muestrasProyeccion === 1 ? "" : "es"} de semana con datos` : " · aún sin datos de fines de semana");
+    } else {
+      document.getElementById("elec-precio-label").textContent = "€/kWh real cargando en las horas más baratas de hoy";
+      document.getElementById("elec-kwh-label").textContent = "kWh/dia";
+      document.getElementById("elec-kwh").textContent = `${r.kwhDia} kWh`;
+      document.getElementById("elec-extra-label").textContent = "Horas de carga necesarias";
+      document.getElementById("elec-extra").textContent = `~${r.horasNecesarias} h`;
+      const m = r.muestrasProyeccion;
+      document.getElementById("elec-meta").textContent =
+        m > 1
+          ? `€/día con el precio de hoy · mes/año con la media de tus mejores horas de ${m} días`
+          : `PVPC ${data.electricidadHoy?.fecha || ""} · mes/año todavía con solo 1 día de histórico`;
+    }
   }
 
   if (data.ahorro) {
@@ -119,6 +133,7 @@ async function cargaResumen() {
   const s = data.settings;
   document.getElementById("set-tiene-coche").checked = !!s.tieneCocheElectrico;
   aplicaVisibilidadTesla(!!s.tieneCocheElectrico);
+  document.getElementById("set-dias-semana").value = s.diasConduccionSemana;
   document.getElementById("set-diesel-consumo").value = s.diesel.consumoL100km;
   document.getElementById("set-diesel-km").value = s.diesel.kmDiaMedio;
   document.getElementById("set-elec-consumo").value = s.electrico.consumoKwh100km;
@@ -127,8 +142,8 @@ async function cargaResumen() {
   document.getElementById("set-elec-llegada").value = s.electrico.horaLlegadaCasa;
   document.getElementById("set-elec-salida").value = s.electrico.horaSalidaTrabajo;
   document.getElementById("set-elec-potencia").value = s.electrico.potenciaCargaKw;
-  document.getElementById("set-notif-dias").value = s.notificaciones.avisoStaleDias;
-  document.getElementById("set-notif-umbral").value = s.notificaciones.umbralAnomaliaPct;
+  document.getElementById("set-elec-estrategia").value = s.electrico.estrategiaCarga;
+  document.getElementById("set-elec-bateria-min").value = s.electrico.bateriaMinPct;
 
   document.getElementById(
     "rec-hint"
@@ -161,7 +176,11 @@ async function cargaComparativa() {
       diffEl.textContent = "—";
     }
 
-    meta.textContent = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh (media de cargar en tus horas más baratas${data.muestrasPrecioElec > 0 ? `, ${data.muestrasPrecioElec} día${data.muestrasPrecioElec === 1 ? "" : "s"} de histórico` : ""})` : ""}`;
+    const esFindes = data.estrategiaCarga === "findes";
+    const textoMuestras = esFindes
+      ? `${data.muestrasPrecioElec} fin${data.muestrasPrecioElec === 1 ? "" : "es"} de semana`
+      : `${data.muestrasPrecioElec} día${data.muestrasPrecioElec === 1 ? "" : "s"}`;
+    meta.textContent = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh (media de cargar ${esFindes ? "concentrado en tus fines de semana más baratos" : "en tus horas más baratas"}${data.muestrasPrecioElec > 0 ? `, ${textoMuestras} de histórico` : ""})` : ""}`;
   } catch (err) {
     meta.textContent = `No se pudo calcular: ${err.message}`;
   }
@@ -496,6 +515,7 @@ function initFormularios() {
       method: "POST",
       body: JSON.stringify({
         tieneCocheElectrico: document.getElementById("set-tiene-coche").checked,
+        diasConduccionSemana: Number(document.getElementById("set-dias-semana").value),
         diesel: {
           consumoL100km: Number(document.getElementById("set-diesel-consumo").value),
           kmDiaMedio: Number(document.getElementById("set-diesel-km").value),
@@ -507,28 +527,12 @@ function initFormularios() {
           horaLlegadaCasa: Number(document.getElementById("set-elec-llegada").value),
           horaSalidaTrabajo: Number(document.getElementById("set-elec-salida").value),
           potenciaCargaKw: Number(document.getElementById("set-elec-potencia").value),
-        },
-        notificaciones: {
-          avisoStaleDias: Number(document.getElementById("set-notif-dias").value),
-          umbralAnomaliaPct: Number(document.getElementById("set-notif-umbral").value),
+          estrategiaCarga: document.getElementById("set-elec-estrategia").value,
+          bateriaMinPct: Number(document.getElementById("set-elec-bateria-min").value),
         },
       }),
     });
     cargaResumen();
-  });
-
-  document.getElementById("btn-notify-test").addEventListener("click", async (e) => {
-    e.preventDefault();
-    const resultado = document.getElementById("notify-resultado");
-    resultado.innerHTML = "Enviando...";
-    try {
-      const data = await api("/notify/test", { method: "POST" });
-      resultado.innerHTML = data.enviado
-        ? `<div class="ok">✅ Enviado a Telegram.</div>`
-        : `<div class="warn">${data.motivo}</div>`;
-    } catch (err) {
-      resultado.innerHTML = `<div class="err">${err.message}</div>`;
-    }
   });
 
   document.getElementById("btn-csv-repostajes").addEventListener("click", async (e) => {
@@ -653,18 +657,6 @@ async function cargaSimulacion() {
   }
 }
 
-async function cargaEstadoNotificaciones() {
-  const el = document.getElementById("notify-status");
-  try {
-    const data = await api("/notify/status");
-    el.textContent = data.configurado
-      ? "✅ Telegram configurado."
-      : "⚠️ Telegram no configurado todavía (variables TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID no definidas). El resto de la app funciona igual sin esto.";
-  } catch (err) {
-    el.textContent = "";
-  }
-}
-
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -678,6 +670,5 @@ cargaGraficoDia("hoy");
 cargaTablaCargas();
 cargaTablaRepostajes();
 cargaEvolucion();
-cargaEstadoNotificaciones();
 recomendar(document.getElementById("rec-bateria").value);
 cargaSimulacion();

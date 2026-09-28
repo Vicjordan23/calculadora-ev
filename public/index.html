@@ -127,9 +127,9 @@
       <div class="card electrico">
         <h2>Eléctrico (PVPC)</h2>
         <div class="price" id="elec-precio">—</div>
-        <div class="price-label">€/kWh real cargando en las horas más baratas de hoy</div>
-        <div class="stat-row"><span>kWh/dia</span><strong id="elec-kwh">—</strong></div>
-        <div class="stat-row"><span>Horas de carga necesarias</span><strong id="elec-horas">—</strong></div>
+        <div class="price-label" id="elec-precio-label">€/kWh real cargando en las horas más baratas de hoy</div>
+        <div class="stat-row"><span id="elec-kwh-label">kWh/dia</span><strong id="elec-kwh">—</strong></div>
+        <div class="stat-row"><span id="elec-extra-label">Horas de carga necesarias</span><strong id="elec-extra">—</strong></div>
         <div class="stat-row"><span>Coste/dia</span><strong id="elec-dia">—</strong></div>
         <div class="stat-row"><span>Coste/mes</span><strong id="elec-mes">—</strong></div>
         <div class="stat-row"><span>Coste/año</span><strong id="elec-anio">—</strong></div>
@@ -240,14 +240,6 @@
   </div>
 
   <section class="panel">
-    <h2>🔔 Notificaciones (Telegram)</h2>
-    <p class="hint">Aviso nocturno con la franja más barata para cargar mañana, alertas de precio del diésel fuera de lo normal, y recordatorio si llevas días sin registrar un repostaje. Configúralo con las variables de entorno <code>TELEGRAM_BOT_TOKEN</code> y <code>TELEGRAM_CHAT_ID</code> (ver DEPLOY.md).</p>
-    <div id="notify-status" class="fetch-meta">Comprobando…</div>
-    <button class="btn-secondary" id="btn-notify-test">Enviar notificación de prueba</button>
-    <div id="notify-resultado" class="recomendacion"></div>
-  </section>
-
-  <section class="panel">
     <h2>Ajustes</h2>
     <form id="form-ajustes" class="grid-form">
       <fieldset>
@@ -255,11 +247,18 @@
         <label class="check-label"><input type="checkbox" id="set-tiene-coche" /> Ya tengo el Tesla (mostrar carga, planificador y precio de la luz)</label>
       </fieldset>
       <fieldset>
+        <legend>Conducción</legend>
+        <label>Días/semana que conduces de verdad
+          <input type="number" id="set-dias-semana" step="1" min="1" max="7" />
+        </label>
+        <p class="hint">Se usa para no calcular el gasto mensual/anual como si condujeras (y cargaras) los 7 días de la semana cuando en realidad, por ejemplo, solo vas al trabajo de lunes a viernes.</p>
+      </fieldset>
+      <fieldset>
         <legend>Coche diesel</legend>
         <label>Consumo (L/100km)
           <input type="number" id="set-diesel-consumo" step="0.1" />
         </label>
-        <label>Km/día de media
+        <label>Km/día de media (los días que conduces)
           <input type="number" id="set-diesel-km" step="1" />
         </label>
       </fieldset>
@@ -271,7 +270,7 @@
         <label>Capacidad batería usable (kWh)
           <input type="number" id="set-elec-capacidad" step="0.1" />
         </label>
-        <label>Km/día de media
+        <label>Km/día de media (los días que conduces)
           <input type="number" id="set-elec-km" step="1" />
         </label>
         <label>Hora de llegada a casa (entre semana)
@@ -283,14 +282,14 @@
         <label>Potencia de carga en casa (kW)
           <input type="number" id="set-elec-potencia" step="0.1" min="0.1" />
         </label>
-      </fieldset>
-      <fieldset>
-        <legend>Notificaciones</legend>
-        <label>Avisar si llevo más de (días sin repostar)
-          <input type="number" id="set-notif-dias" step="1" min="1" />
+        <label>Estrategia de carga
+          <select id="set-elec-estrategia">
+            <option value="findes">Concentrada el fin de semana (cargar sáb/dom, tirar de batería entre semana)</option>
+            <option value="diaria">Cada día que toque, en las horas más baratas de ese día</option>
+          </select>
         </label>
-        <label>Avisar si el diésel se mueve más de (%)
-          <input type="number" id="set-notif-umbral" step="0.5" min="0.5" />
+        <label>Batería mínima antes de recargar (%)
+          <input type="number" id="set-elec-bateria-min" step="1" min="0" max="90" />
         </label>
       </fieldset>
       <button type="submit" class="btn-primary">Guardar ajustes</button>

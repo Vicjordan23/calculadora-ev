@@ -6,6 +6,10 @@ const DEFAULT_SETTINGS = {
   // precio de la luz por horas), para no meter ruido en el uso diario:
   // registrar repostajes y ver la comparativa real vs Tesla.
   tieneCocheElectrico: false,
+  // Dias/semana que realmente se conduce (p.ej. solo de lunes a viernes para
+  // ir a trabajar): las proyecciones de coste mensual/anual escalan por esto
+  // en vez de asumir que se conduce los 7 dias de la semana.
+  diasConduccionSemana: 5,
   diesel: {
     consumoL100km: 6,
     kmDiaMedio: 60,
@@ -24,10 +28,16 @@ const DEFAULT_SETTINGS = {
     // Potencia real disponible para el coche en casa (no toda la potencia
     // contratada: cable/toma domestica tipica en Espana sin wallbox trifasico).
     potenciaCargaKw: 3,
-  },
-  notificaciones: {
-    avisoStaleDias: 10,
-    umbralAnomaliaPct: 3,
+    // % de bateria por debajo del cual hay que volver a cargar (margen de
+    // seguridad); junto con capacidadBateriaKwh define cuanta energia cabe
+    // cargar de golpe el fin de semana.
+    bateriaMinPct: 15,
+    // "findes": cargar concentrado el sabado/domingo (cuando el PVPC suele
+    // tener muchas horas baratas o gratis) y tirar de bateria el resto de la
+    // semana sin volver a enchufar. "diaria": cargar cada dia que toque, en
+    // las horas mas baratas disponibles ese dia (respetando el horario de
+    // trabajo entre semana).
+    estrategiaCarga: "findes",
   },
 };
 
@@ -51,9 +61,9 @@ async function getSettings() {
   if (!stored) return DEFAULT_SETTINGS;
   return {
     tieneCocheElectrico: stored.tieneCocheElectrico ?? DEFAULT_SETTINGS.tieneCocheElectrico,
+    diasConduccionSemana: stored.diasConduccionSemana ?? DEFAULT_SETTINGS.diasConduccionSemana,
     diesel: { ...DEFAULT_SETTINGS.diesel, ...(stored.diesel || {}) },
     electrico: { ...DEFAULT_SETTINGS.electrico, ...(stored.electrico || {}) },
-    notificaciones: { ...DEFAULT_SETTINGS.notificaciones, ...(stored.notificaciones || {}) },
   };
 }
 
@@ -61,9 +71,9 @@ async function saveSettings(partial) {
   const current = await getSettings();
   const merged = {
     tieneCocheElectrico: partial.tieneCocheElectrico ?? current.tieneCocheElectrico,
+    diasConduccionSemana: partial.diasConduccionSemana ?? current.diasConduccionSemana,
     diesel: { ...current.diesel, ...(partial.diesel || {}) },
     electrico: { ...current.electrico, ...(partial.electrico || {}) },
-    notificaciones: { ...current.notificaciones, ...(partial.notificaciones || {}) },
   };
   await setKv("settings", merged);
   return merged;

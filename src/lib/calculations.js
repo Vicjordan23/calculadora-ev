@@ -1,14 +1,19 @@
 /**
- * Coste diario/mensual/anual de circular con el coche diesel.
+ * Coste diario/mensual/anual de circular con el coche diesel. costeMes/
+ * costeAnio se escalan por diasConduccionSemana/7 para no asumir que se
+ * conduce los 7 dias de la semana cuando en realidad solo se conduce, por
+ * ejemplo, de lunes a viernes (valor por defecto 7 mantiene el comportamiento
+ * antiguo si no se indica).
  */
-function costeDiesel({ kmDiaMedio, consumoL100km, precioPorLitro }) {
+function costeDiesel({ kmDiaMedio, consumoL100km, precioPorLitro, diasConduccionSemana = 7 }) {
   const litrosDia = (kmDiaMedio / 100) * consumoL100km;
   const costeDia = litrosDia * precioPorLitro;
+  const factorSemana = diasConduccionSemana / 7;
   return {
     litrosDia: Number(litrosDia.toFixed(2)),
     costeDia: Number(costeDia.toFixed(2)),
-    costeMes: Number((costeDia * 30).toFixed(2)),
-    costeAnio: Number((costeDia * 365).toFixed(2)),
+    costeMes: Number((costeDia * 30 * factorSemana).toFixed(2)),
+    costeAnio: Number((costeDia * 365 * factorSemana).toFixed(2)),
     costePorKm: Number((costeDia / kmDiaMedio).toFixed(4)),
   };
 }
@@ -103,8 +108,9 @@ function costeSesionCarga({ fecha, horaInicio, duracionHoras, kwhCargados, getPr
  * @param {Array<{fecha, precio}>} historicoPrecios precio medio diario historico
  * @param {number} kmDiaMedio
  * @param {number} consumoPor100km L o kWh por 100km
+ * @param {number} diasConduccionSemana dias/semana que se conduce de verdad (por defecto 7)
  */
-function evolucionMensual({ registros, historicoPrecios, kmDiaMedio, consumoPor100km }) {
+function evolucionMensual({ registros, historicoPrecios, kmDiaMedio, consumoPor100km, diasConduccionSemana = 7 }) {
   const real = {};
   for (const r of registros) {
     const mes = r.fecha.slice(0, 7);
@@ -128,7 +134,10 @@ function evolucionMensual({ registros, historicoPrecios, kmDiaMedio, consumoPor1
 
     const [y, m] = mes.split("-").map(Number);
     const diasDelMes = new Date(Date.UTC(y, m, 0)).getUTCDate();
-    const teorico = precioMedio != null ? Number(((kmDiaMedio / 100) * consumoPor100km * precioMedio * diasDelMes).toFixed(2)) : null;
+    // Dias "efectivos" de conduccion en el mes, no todos los dias del mes
+    // (evita asumir que se conduce tambien los fines de semana si no es asi).
+    const diasEfectivos = diasDelMes * (diasConduccionSemana / 7);
+    const teorico = precioMedio != null ? Number(((kmDiaMedio / 100) * consumoPor100km * precioMedio * diasEfectivos).toFixed(2)) : null;
 
     return {
       mes,
@@ -269,6 +278,41 @@ function agrupaBloques(horasUsadas) {
   return bloques;
 }
 
+/**
+ * Estrategia "cargar el fin de semana para toda la semana": en vez de pagar
+ * el precio (mas caro y mas restringido por el horario de trabajo) de cada
+ * noche entre semana, se carga la bateria a tope el sabado/domingo -- cuando
+ * el PVPC suele tener muchas horas baratas o gratis y no hay restriccion
+ * horaria -- y se va gastando bateria el resto de la semana sin volver a
+ * enchufar. Para cada sabado del que tengamos precios guardados (emparejado
+ * con el domingo siguiente si tambien lo tenemos), calcula cuanto costaria
+ * cargar `energiaNecesariaSemanaKwh` usando solo esas horas del finde,
+ * priorizando siempre las mas baratas primero (igual que
+ * seleccionaHorasMasBaratas, del que reutiliza la logica).
+ * @param {Array<{fecha, horas:[{hora,precioEurKwh}]}>} dias
+ */
+function simulacionCargaFinesSemana({ dias, energiaNecesariaSemanaKwh, potenciaCargaKw }) {
+  const porFecha = new Map(dias.map((d) => [d.fecha, d]));
+  const resultado = [];
+
+  for (const d of dias) {
+    if (diaSemanaUTC(d.fecha) !== 6) continue; // arranca en cada sabado
+    const domingoFecha = sumaDiasISO(d.fecha, 1);
+    const domingo = porFecha.get(domingoFecha);
+
+    const horas = [
+      ...d.horas.map((h) => ({ fecha: d.fecha, hora: h.hora, precioEurKwh: h.precioEurKwh })),
+      ...(domingo ? domingo.horas.map((h) => ({ fecha: domingoFecha, hora: h.hora, precioEurKwh: h.precioEurKwh })) : []),
+    ];
+    if (horas.length === 0) continue;
+
+    const seleccion = seleccionaHorasMasBaratas(horas, energiaNecesariaSemanaKwh, potenciaCargaKw);
+    resultado.push({ sabado: d.fecha, domingo: domingo ? domingoFecha : null, ...seleccion });
+  }
+
+  return resultado;
+}
+
 module.exports = {
   costeDiesel,
   segmentosSesion,
@@ -281,4 +325,5 @@ module.exports = {
   agrupaBloques,
   seleccionaHorasMasBaratas,
   simulacionCargaRestringida,
+  simulacionCargaFinesSemana,
 };
