@@ -1,7 +1,7 @@
 const fmtEur = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`);
 const fmtEur3 = (n) => (n == null ? "—" : `${n.toLocaleString("es-ES", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €`);
 
-let chartPrecios, chartEvolucionDiesel, chartEvolucionElectrico;
+let chartPrecios, chartEvolucionDiesel, chartEvolucionElectrico, chartComparativaMensual;
 let ultimoPrecioDiesel = null;
 let ultimoPlan = null;
 let diaActual = "hoy";
@@ -89,6 +89,7 @@ async function cargaResumen() {
   if (data.resumenDiesel) {
     document.getElementById("diesel-litros").textContent = `${data.resumenDiesel.litrosDia} L`;
     document.getElementById("diesel-dia").textContent = fmtEur(data.resumenDiesel.costeDia);
+    document.getElementById("diesel-semana").textContent = fmtEur(data.resumenDiesel.costeSemana);
     document.getElementById("diesel-mes").textContent = fmtEur(data.resumenDiesel.costeMes);
     document.getElementById("diesel-anio").textContent = fmtEur(data.resumenDiesel.costeAnio);
   }
@@ -97,6 +98,7 @@ async function cargaResumen() {
     const r = data.resumenElectrico;
     document.getElementById("elec-precio").textContent = fmtEur3(r.precioMedioEurKwh);
     document.getElementById("elec-dia").textContent = fmtEur(r.costeDia);
+    document.getElementById("elec-semana").textContent = fmtEur(r.costeSemana ?? r.costeDia * 7);
     document.getElementById("elec-mes").textContent = fmtEur(r.costeMes);
     document.getElementById("elec-anio").textContent = fmtEur(r.costeAnio);
 
@@ -109,6 +111,7 @@ async function cargaResumen() {
       document.getElementById("elec-meta").textContent =
         `Carga concentrada el sáb/dom (batería del ${100 - r.bateriaMinPct}%→100% hasta el ${r.bateriaMinPct}%), ${r.diasConduccionSemana} días de conducción/semana` +
         (r.muestrasProyeccion > 0 ? ` · media de ${r.muestrasProyeccion} fin${r.muestrasProyeccion === 1 ? "" : "es"} de semana con datos` : " · aún sin datos de fines de semana");
+      pintaSemanaCarga(r, data.settings.electrico);
     } else {
       document.getElementById("elec-precio-label").textContent = "€/kWh real cargando en las horas más baratas de hoy";
       document.getElementById("elec-kwh-label").textContent = "kWh/dia";
@@ -120,13 +123,19 @@ async function cargaResumen() {
         m > 1
           ? `€/día con el precio de hoy · mes/año con la media de tus mejores horas de ${m} días`
           : `PVPC ${data.electricidadHoy?.fecha || ""} · mes/año todavía con solo 1 día de histórico`;
+      document.getElementById("panel-semana-carga").classList.add("oculto");
     }
   }
 
   if (data.ahorro) {
     document.getElementById("ahorro-anio").textContent = fmtEur(data.ahorro.anioEur);
+    document.getElementById("ahorro-anio-tile").textContent = fmtEur(data.ahorro.anioEur);
     document.getElementById("ahorro-dia").textContent = fmtEur(data.ahorro.diaEur);
     document.getElementById("ahorro-mes").textContent = fmtEur(data.ahorro.mesEur);
+    if (data.resumenDiesel && data.resumenElectrico) {
+      const semanaEur = data.resumenDiesel.costeSemana - (data.resumenElectrico.costeSemana ?? data.resumenElectrico.costeDia * 7);
+      document.getElementById("ahorro-semana").textContent = fmtEur(Number(semanaEur.toFixed(2)));
+    }
   }
 
   // Ajustes: precarga los valores actuales
@@ -144,10 +153,59 @@ async function cargaResumen() {
   document.getElementById("set-elec-potencia").value = s.electrico.potenciaCargaKw;
   document.getElementById("set-elec-estrategia").value = s.electrico.estrategiaCarga;
   document.getElementById("set-elec-bateria-min").value = s.electrico.bateriaMinPct;
+  document.getElementById("set-elec-carga-completa").checked = !!s.electrico.cargaCompletaFinde;
 
   document.getElementById(
     "rec-hint"
   ).textContent = `Solo cuentan las horas en las que realmente podrías cargar en casa (de ${String(s.electrico.horaLlegadaCasa).padStart(2, "0")}:00 a ${String(s.electrico.horaSalidaTrabajo).padStart(2, "0")}:00 entre semana; el fin de semana entero), repartiendo la energía a ${s.electrico.potenciaCargaKw} kW — nunca se carga todo en una hora.`;
+}
+
+// Visualiza la semana tipo: bateria al 100% el lunes, bajando con cada dia
+// de conduccion, y recarga completa el sabado/domingo con las horas reales
+// del ultimo fin de semana con datos (no un ejemplo generico).
+function pintaSemanaCarga(r, elecSettings) {
+  const panel = document.getElementById("panel-semana-carga");
+  if (!r.ultimoFinde) {
+    panel.classList.add("oculto");
+    return;
+  }
+  panel.classList.remove("oculto");
+
+  const capacidad = elecSettings.capacidadBateriaKwh;
+  const kwhDia = r.kwhDia;
+  const diasConduccion = Math.min(r.diasConduccionSemana || 5, 5);
+  const pctPorDia = capacidad > 0 ? (kwhDia / capacidad) * 100 : 0;
+
+  const nombres = ["LUN", "MAR", "MIÉ", "JUE", "VIE"];
+  let pct = 100;
+  const dias = [];
+  for (let i = 0; i < 5; i++) {
+    dias.push({ nombre: nombres[i], pct: Math.max(0, Math.round(pct)), carga: false });
+    if (i < diasConduccion) pct -= pctPorDia;
+  }
+  dias.push({ nombre: "SÁB ⚡", pct: 100, carga: true });
+  dias.push({ nombre: "DOM ⚡", pct: 100, carga: true });
+
+  const colorPara = (p, carga) => (carga ? "#4ae08c" : p <= 20 ? "#e0a24a" : p <= 50 ? "#4ac0e0" : "#4ae08c");
+
+  document.getElementById("semana-tira").innerHTML = dias
+    .map(
+      (d) => `
+    <div class="semana-dia">
+      <div class="nombre">${d.nombre}</div>
+      <div class="semana-barra"><div class="relleno" style="height:${d.pct}%; background:${colorPara(d.pct, d.carga)};"></div></div>
+      <div class="pct">${d.pct}%</div>
+    </div>`
+    )
+    .join("");
+
+  const f = r.ultimoFinde;
+  document.getElementById("semana-resumen").innerHTML = `
+    <div class="item"><span>Se carga</span><strong>${formatoBloques(f.bloques)}</strong></div>
+    <div class="item"><span>Energía del último finde</span><strong>${f.kwh} kWh</strong></div>
+    <div class="item"><span>Precio medio</span><strong>${fmtEur3(f.precioMedioEurKwh)}/kWh</strong></div>
+    <div class="item"><span>Coste del finde</span><strong>${fmtEur(f.costeTotal)}</strong></div>
+  `;
 }
 
 function aplicaVisibilidadTesla(tiene) {
@@ -162,6 +220,7 @@ async function cargaComparativa() {
       document.getElementById("comp-diesel").textContent = "—";
       document.getElementById("comp-tesla").textContent = "—";
       document.getElementById("comp-diferencia").textContent = "—";
+      document.getElementById("comp-badge-pct").textContent = "—";
       meta.textContent = "Registra tu primer repostaje para empezar a ver la comparativa.";
       return;
     }
@@ -176,25 +235,89 @@ async function cargaComparativa() {
       diffEl.textContent = "—";
     }
 
+    const pctBadge = document.getElementById("comp-badge-pct");
+    if (data.costeTeslaEstimado != null && data.costeDieselReal > 0) {
+      const pct = Math.round((1 - data.costeTeslaEstimado / data.costeDieselReal) * 100);
+      pctBadge.textContent = `${pct}%`;
+    } else {
+      pctBadge.textContent = "—";
+    }
+
     const esFindes = data.estrategiaCarga === "findes";
     const textoMuestras = esFindes
       ? `${data.muestrasPrecioElec} fin${data.muestrasPrecioElec === 1 ? "" : "es"} de semana`
       : `${data.muestrasPrecioElec} día${data.muestrasPrecioElec === 1 ? "" : "s"}`;
-    meta.textContent = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh (media de cargar ${esFindes ? "concentrado en tus fines de semana más baratos" : "en tus horas más baratas"}${data.muestrasPrecioElec > 0 ? `, ${textoMuestras} de histórico` : ""})` : ""}`;
+    const etiquetaReal = data.esCosteRealHistorico
+      ? ` · <strong>coste real</strong> (no estimado): se ha sumado lo que costó cada fin de semana de verdad, ${data.coberturaFindesPct}% de findes con datos`
+      : data.coberturaFindesPct != null
+        ? ` · proyección (solo ${data.coberturaFindesPct}% de los findes de ese periodo tienen precio guardado)`
+        : "";
+    meta.innerHTML = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh (media de cargar ${esFindes ? "concentrado en tus fines de semana más baratos" : "en tus horas más baratas"}${data.muestrasPrecioElec > 0 ? `, ${textoMuestras} de histórico` : ""})` : ""}${etiquetaReal}`;
+
+    if (data.evolucionMensualElectricoReal && data.evolucionMensualElectricoReal.length > 0) {
+      try {
+        const dieselMensual = await api("/diesel/evolution");
+        pintaGraficoComparativaMensual(dieselMensual, data.evolucionMensualElectricoReal);
+      } catch (err) {
+        /* silencioso: el hero ya tiene los totales */
+      }
+    }
   } catch (err) {
     meta.textContent = `No se pudo calcular: ${err.message}`;
   }
 }
 
+function pintaGraficoComparativaMensual(dieselMensual, electricoMensual) {
+  const meses = [...new Set([...dieselMensual.map((d) => d.mes), ...electricoMensual.map((d) => d.mes)])].sort();
+  const dieselPorMes = Object.fromEntries(dieselMensual.map((d) => [d.mes, d.real]));
+  const electricoPorMes = Object.fromEntries(electricoMensual.map((d) => [d.mes, d.real]));
+
+  const ctx = document.getElementById("chart-comparativa-mensual");
+  if (chartComparativaMensual) chartComparativaMensual.destroy();
+  chartComparativaMensual = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: meses,
+      datasets: [
+        { label: "Diésel real", data: meses.map((m) => dieselPorMes[m] ?? null), backgroundColor: "#e0a24a", borderRadius: 4 },
+        { label: "Eléctrico real (findes)", data: meses.map((m) => electricoPorMes[m] ?? null), backgroundColor: "#4ac0e0", borderRadius: 4 },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true, labels: { color: "#9aa1ac" } } },
+      scales: {
+        x: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" } },
+        y: { ticks: { color: "#9aa1ac" }, grid: { color: "#2a2f3a" }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+const DIAS_SEMANA_CORTO_MIN = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+
+// Etiqueta cada bloque con "hoy"/"mañana" cuando aplica (planificador a corto
+// plazo) o con el día+fecha real en cualquier otro caso (p.ej. un fin de
+// semana ya pasado) -- antes cualquier fecha que no fuera hoy salía como
+// "mañana", lo que confundía en bloques historicos.
 function formatoBloques(bloques) {
   if (!bloques || bloques.length === 0) return "sin horas disponibles";
   const hoyStr = new Date().toISOString().slice(0, 10);
+  const mananaStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   let fechaAnterior = null;
   return bloques
     .map((b) => {
       const cambiaDia = b.fecha && b.fecha !== fechaAnterior;
       fechaAnterior = b.fecha;
-      const dia = cambiaDia ? `${b.fecha === hoyStr ? "hoy" : "mañana"} ` : "";
+      let dia = "";
+      if (cambiaDia && b.fecha) {
+        if (b.fecha === hoyStr) dia = "hoy ";
+        else if (b.fecha === mananaStr) dia = "mañana ";
+        else {
+          const d = new Date(b.fecha + "T00:00:00");
+          dia = `${DIAS_SEMANA_CORTO_MIN[d.getDay()]} ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} `;
+        }
+      }
       const ini = String(b.horaInicio).padStart(2, "0");
       const fin = String(b.horaFin % 24).padStart(2, "0");
       return `${dia}de ${ini}:00 a ${fin}:00`;
@@ -293,8 +416,29 @@ async function recomendar(bateriaActualPct, esReintento = false) {
   }
 }
 
+function calculaEstadisticasCargas(chargesAsc) {
+  const ahora = new Date();
+  const mesActual = ahora.getMonth();
+  const anioActual = ahora.getFullYear();
+  let totalMes = 0;
+  let totalAnio = 0;
+  chargesAsc.forEach((c) => {
+    const d = new Date(c.fecha + "T00:00:00");
+    if (d.getFullYear() === anioActual) {
+      totalAnio += c.costeTotal;
+      if (d.getMonth() === mesActual) totalMes += c.costeTotal;
+    }
+  });
+  return { totalMes: Number(totalMes.toFixed(2)), totalAnio: Number(totalAnio.toFixed(2)) };
+}
+
 async function cargaTablaCargas() {
   const charges = await api("/charges");
+
+  const stats = calculaEstadisticasCargas(charges);
+  document.getElementById("elec-real-mes").textContent = fmtEur(stats.totalMes);
+  document.getElementById("elec-real-anio").textContent = fmtEur(stats.totalAnio);
+
   const tbody = document.querySelector("#tabla-cargas tbody");
   tbody.innerHTML = "";
   charges
@@ -529,6 +673,7 @@ function initFormularios() {
           potenciaCargaKw: Number(document.getElementById("set-elec-potencia").value),
           estrategiaCarga: document.getElementById("set-elec-estrategia").value,
           bateriaMinPct: Number(document.getElementById("set-elec-bateria-min").value),
+          cargaCompletaFinde: document.getElementById("set-elec-carga-completa").checked,
         },
       }),
     });
@@ -626,13 +771,26 @@ const DIAS_SEMANA_CORTO = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 async function cargaSimulacion() {
   try {
     const data = await api("/electricity/simulation");
+    const esFindes = data.modo === "findes";
+
+    document.getElementById("tabla-simulacion-titulo").textContent = esFindes
+      ? "💡 Lo que habría costado cargar el Tesla cada fin de semana"
+      : "💡 Lo que habría costado cargar el Tesla en casa";
+    document.getElementById("tabla-simulacion-hint").textContent = esFindes
+      ? "Un solo evento de carga por fin de semana (sábado+domingo juntos, no la media de un día suelto), hasta tu batería objetivo, con los precios PVPC reales de ese finde en concreto. Entre semana no se carga (si registras una carga manual entre semana, esa sí usa el precio real de ese día, pero esta tabla automática no se lo inventa)."
+      : "Simulación día a día con los precios PVPC reales y tu ventana de carga real (no cuando quieras, sino cuando de verdad podrías enchufar el coche). Se va acumulando cada día que pasa.";
 
     document.getElementById("stats-simulacion").innerHTML = `
-      <div class="stat-box"><span>Días simulados</span><strong>${data.totalDias}</strong></div>
+      <div class="stat-box"><span>${esFindes ? "Fines de semana simulados" : "Días simulados"}</span><strong>${data.totalDias}</strong></div>
       <div class="stat-box"><span>Coste simulado total</span><strong>${fmtEur(data.totalCoste)}</strong></div>
-      <div class="stat-box"><span>Media por día</span><strong>${fmtEur(data.costeMedioDia)}</strong></div>
+      <div class="stat-box"><span>${esFindes ? "Media por finde" : "Media por día"}</span><strong>${fmtEur(data.costeMedioDia)}</strong></div>
       <div class="stat-box"><span>Diésel real en el mismo periodo</span><strong>${data.gastoDieselMismoPeriodo != null ? fmtEur(data.gastoDieselMismoPeriodo) : "— (sin repostajes en ese rango)"}</strong></div>
     `;
+
+    const theadFecha = document.getElementById("tabla-simulacion-th-fecha");
+    const theadKwh = document.getElementById("tabla-simulacion-th-kwh");
+    if (theadFecha) theadFecha.textContent = esFindes ? "Fin de semana" : "Fecha";
+    if (theadKwh) theadKwh.textContent = esFindes ? "kWh cargados" : "kWh";
 
     const tbody = document.querySelector("#tabla-simulacion tbody");
     tbody.innerHTML = "";
@@ -640,16 +798,31 @@ async function cargaSimulacion() {
       .slice()
       .reverse()
       .forEach((d) => {
-        const diaSemana = DIAS_SEMANA_CORTO[new Date(d.fecha + "T00:00:00Z").getUTCDay()];
         const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${d.fecha}</td>
-          <td>${diaSemana}${d.esFinde ? " 🏖️" : ""}</td>
-          <td>${d.energiaNecesariaKwh} kWh</td>
-          <td>${fmtEur(d.costeTotal)}</td>
-          <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
-          <td>${formatoBloques(d.bloques)}</td>
-        `;
+        if (esFindes) {
+          const fmtDiaMes = (iso) => {
+            const dt = new Date(iso + "T00:00:00Z");
+            return `${String(dt.getUTCDate()).padStart(2, "0")}/${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+          };
+          tr.innerHTML = `
+            <td>${fmtDiaMes(d.fecha)}–${fmtDiaMes(d.fechaFin)} 🏖️</td>
+            <td>—</td>
+            <td>${d.energiaCubiertaKwh} kWh</td>
+            <td>${fmtEur(d.costeTotal)}</td>
+            <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
+            <td>${formatoBloques(d.bloques)}</td>
+          `;
+        } else {
+          const diaSemana = DIAS_SEMANA_CORTO[new Date(d.fecha + "T00:00:00Z").getUTCDay()];
+          tr.innerHTML = `
+            <td>${d.fecha}</td>
+            <td>${diaSemana}${d.esFinde ? " 🏖️" : ""}</td>
+            <td>${d.energiaNecesariaKwh} kWh</td>
+            <td>${fmtEur(d.costeTotal)}</td>
+            <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
+            <td>${formatoBloques(d.bloques)}</td>
+          `;
+        }
         tbody.appendChild(tr);
       });
   } catch (err) {

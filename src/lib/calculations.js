@@ -12,6 +12,7 @@ function costeDiesel({ kmDiaMedio, consumoL100km, precioPorLitro, diasConduccion
   return {
     litrosDia: Number(litrosDia.toFixed(2)),
     costeDia: Number(costeDia.toFixed(2)),
+    costeSemana: Number((costeDia * diasConduccionSemana).toFixed(2)),
     costeMes: Number((costeDia * 30 * factorSemana).toFixed(2)),
     costeAnio: Number((costeDia * 365 * factorSemana).toFixed(2)),
     costePorKm: Number((costeDia / kmDiaMedio).toFixed(4)),
@@ -313,6 +314,27 @@ function simulacionCargaFinesSemana({ dias, energiaNecesariaSemanaKwh, potenciaC
   return resultado;
 }
 
+/**
+ * Agrupa por mes los resultados de simulacionCargaFinesSemana (un registro
+ * por fin de semana con datos), sumando el coste de cada finde al mes de su
+ * sabado. Sirve para el grafico "gasto electrico real por mes" una vez
+ * rellenado el historico de precios de fin de semana.
+ * @param {Array<{sabado, costeTotal, precioMedioEurKwh}>} findes
+ */
+function agrupaFindesPorMes(findes) {
+  const porMes = {};
+  for (const f of findes) {
+    if (f.precioMedioEurKwh == null) continue;
+    const mes = f.sabado.slice(0, 7);
+    porMes[mes] = porMes[mes] || { total: 0, findes: 0 };
+    porMes[mes].total += f.costeTotal;
+    porMes[mes].findes += 1;
+  }
+  return Object.entries(porMes)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([mes, v]) => ({ mes, real: Number(v.total.toFixed(2)), findes: v.findes }));
+}
+
 module.exports = {
   costeDiesel,
   segmentosSesion,
@@ -326,4 +348,5 @@ module.exports = {
   seleccionaHorasMasBaratas,
   simulacionCargaRestringida,
   simulacionCargaFinesSemana,
+  agrupaFindesPorMes,
 };

@@ -38,6 +38,12 @@ const DEFAULT_SETTINGS = {
     // las horas mas baratas disponibles ese dia (respetando el horario de
     // trabajo entre semana).
     estrategiaCarga: "findes",
+    // Solo aplica con estrategiaCarga "findes": true = cargar siempre hasta
+    // el 100% cada fin de semana (asi es como de verdad se usa el cargador,
+    // sin calcular la energia exacta); false = cargar solo la energia justa
+    // que hace falta para la semana (un pelin mas barato en teoria, pero no
+    // deja margen).
+    cargaCompletaFinde: true,
   },
 };
 

@@ -25,21 +25,28 @@
   <section class="panel comparativa-principal">
     <h2>🆚 Diésel real vs Tesla (mismos km)</h2>
     <p class="hint" id="comp-hint">Basado en los litros que de verdad has comprado, para saber qué te habría costado recorrer esos mismos km cargando en casa.</p>
-    <div class="comparativa-grid" id="comparativa-grid">
-      <div class="comp-box diesel">
-        <span>Diésel gastado</span>
-        <strong id="comp-diesel">—</strong>
+    <div class="comparativa-hero">
+      <div class="comparativa-grid" id="comparativa-grid">
+        <div class="comp-box diesel">
+          <span>Diésel gastado</span>
+          <strong id="comp-diesel">—</strong>
+        </div>
+        <div class="comp-box electrico">
+          <span>Tesla te habría costado</span>
+          <strong id="comp-tesla">—</strong>
+        </div>
+        <div class="comp-box ahorro">
+          <span>Diferencia</span>
+          <strong id="comp-diferencia">—</strong>
+        </div>
       </div>
-      <div class="comp-box electrico">
-        <span>Tesla te habría costado</span>
-        <strong id="comp-tesla">—</strong>
-      </div>
-      <div class="comp-box ahorro">
-        <span>Diferencia</span>
-        <strong id="comp-diferencia">—</strong>
+      <div class="comp-badge" id="comp-badge">
+        <div class="comp-badge-pct" id="comp-badge-pct">—</div>
+        <div class="comp-badge-label">más barato</div>
       </div>
     </div>
     <div class="fetch-meta" id="comp-meta"></div>
+    <canvas id="chart-comparativa-mensual" height="90" style="margin-top:16px"></canvas>
   </section>
 
   <section class="panel" id="panel-repostajes">
@@ -95,44 +102,54 @@
   </section>
 
   <section class="panel">
-    <h2>💡 Lo que habría costado cargar el Tesla en casa</h2>
-    <p class="hint">Simulación día a día con los precios PVPC reales y tu ventana de carga real (no cuando quieras, sino cuando de verdad podrías enchufar el coche). Se va acumulando cada día que pasa.</p>
+    <h2 id="tabla-simulacion-titulo">💡 Lo que habría costado cargar el Tesla en casa</h2>
+    <p class="hint" id="tabla-simulacion-hint">Simulación día a día con los precios PVPC reales y tu ventana de carga real (no cuando quieras, sino cuando de verdad podrías enchufar el coche). Se va acumulando cada día que pasa.</p>
     <div class="stats-repostajes" id="stats-simulacion"></div>
     <table class="tabla-cargas" id="tabla-simulacion">
       <thead>
-        <tr><th>Fecha</th><th>Día</th><th>kWh</th><th>Coste simulado</th><th>€/kWh medio</th><th>Ventana de carga</th></tr>
+        <tr><th id="tabla-simulacion-th-fecha">Fecha</th><th>Día</th><th id="tabla-simulacion-th-kwh">kWh</th><th>Coste simulado</th><th>€/kWh medio</th><th>Ventana de carga</th></tr>
       </thead>
       <tbody></tbody>
     </table>
   </section>
 
   <section class="panel" id="seccion-estimacion">
-    <h2>Estimación diaria (según ajustes)</h2>
-    <p class="hint">Proyección teórica con tus km/día configurados, no tu gasto real.</p>
+    <h2>Cuánto cuesta: Día · Semana · Mes · Año</h2>
+    <p class="hint">Arriba lo estimado según tus ajustes y estrategia de carga; abajo lo que de verdad has gastado (repostajes/cargas registradas).</p>
     <div class="cards" id="resumen-cards">
       <div class="card diesel">
-        <h2>Diesel</h2>
+        <h2>🛢️ Diesel</h2>
         <div class="price" id="diesel-precio">—</div>
         <div class="price-label">€/litro (Ballenoil Guadalajara / Alcalá de Henares)</div>
-        <div class="stat-row"><span>Litros/dia</span><strong id="diesel-litros">—</strong></div>
-        <div class="stat-row"><span>Coste/dia</span><strong id="diesel-dia">—</strong></div>
-        <div class="stat-row"><span>Coste/mes</span><strong id="diesel-mes">—</strong></div>
-        <div class="stat-row"><span>Coste/año</span><strong id="diesel-anio">—</strong></div>
-        <div class="stat-row real"><span>Gastado este mes (real)</span><strong id="diesel-real-mes">—</strong></div>
-        <div class="stat-row real"><span>Gastado este año (real)</span><strong id="diesel-real-anio">—</strong></div>
+        <div class="tiles">
+          <div class="tile"><span>Día</span><strong id="diesel-dia">—</strong></div>
+          <div class="tile"><span>Semana</span><strong id="diesel-semana">—</strong></div>
+          <div class="tile"><span>Mes</span><strong id="diesel-mes">—</strong></div>
+          <div class="tile"><span>Año</span><strong id="diesel-anio">—</strong></div>
+        </div>
+        <div class="stat-row"><span>Litros/día</span><strong id="diesel-litros">—</strong></div>
+        <div class="real-label">Real registrado (repostajes)</div>
+        <div class="stat-row real"><span>Este mes</span><strong id="diesel-real-mes">—</strong></div>
+        <div class="stat-row real"><span>Este año</span><strong id="diesel-real-anio">—</strong></div>
         <button class="btn-secondary" id="btn-refresh-diesel">Refrescar precio</button>
         <div class="fetch-meta" id="diesel-meta"></div>
       </div>
 
       <div class="card electrico">
-        <h2>Eléctrico (PVPC)</h2>
+        <h2>⚡ Eléctrico (PVPC)</h2>
         <div class="price" id="elec-precio">—</div>
         <div class="price-label" id="elec-precio-label">€/kWh real cargando en las horas más baratas de hoy</div>
+        <div class="tiles">
+          <div class="tile"><span>Día</span><strong id="elec-dia">—</strong></div>
+          <div class="tile"><span>Semana</span><strong id="elec-semana">—</strong></div>
+          <div class="tile"><span>Mes</span><strong id="elec-mes">—</strong></div>
+          <div class="tile"><span>Año</span><strong id="elec-anio">—</strong></div>
+        </div>
         <div class="stat-row"><span id="elec-kwh-label">kWh/dia</span><strong id="elec-kwh">—</strong></div>
         <div class="stat-row"><span id="elec-extra-label">Horas de carga necesarias</span><strong id="elec-extra">—</strong></div>
-        <div class="stat-row"><span>Coste/dia</span><strong id="elec-dia">—</strong></div>
-        <div class="stat-row"><span>Coste/mes</span><strong id="elec-mes">—</strong></div>
-        <div class="stat-row"><span>Coste/año</span><strong id="elec-anio">—</strong></div>
+        <div class="real-label">Real registrado (cargas)</div>
+        <div class="stat-row real"><span>Este mes</span><strong id="elec-real-mes">—</strong></div>
+        <div class="stat-row real"><span>Este año</span><strong id="elec-real-anio">—</strong></div>
         <button class="btn-secondary" id="btn-refresh-elec">Refrescar precio</button>
         <div class="fetch-meta" id="elec-meta"></div>
       </div>
@@ -141,10 +158,21 @@
         <h2>Ahorro estimado</h2>
         <div class="price" id="ahorro-anio">—</div>
         <div class="price-label">€/año cargando en casa vs diesel</div>
-        <div class="stat-row"><span>Ahorro/dia</span><strong id="ahorro-dia">—</strong></div>
-        <div class="stat-row"><span>Ahorro/mes</span><strong id="ahorro-mes">—</strong></div>
+        <div class="tiles">
+          <div class="tile"><span>Día</span><strong id="ahorro-dia">—</strong></div>
+          <div class="tile"><span>Semana</span><strong id="ahorro-semana">—</strong></div>
+          <div class="tile"><span>Mes</span><strong id="ahorro-mes">—</strong></div>
+          <div class="tile"><span>Año</span><strong id="ahorro-anio-tile">—</strong></div>
+        </div>
       </div>
     </div>
+  </section>
+
+  <section class="panel oculto" id="panel-semana-carga">
+    <h2>🗓️ Tu semana de carga</h2>
+    <p class="hint">Batería al 100% el lunes, bajando con cada trayecto, y recarga completa el fin de semana con las horas más baratas de ese finde en concreto.</p>
+    <div class="semana-tira" id="semana-tira"></div>
+    <div class="semana-resumen" id="semana-resumen"></div>
   </section>
 
   <div id="seccion-cuando-tengas-tesla">
@@ -291,6 +319,7 @@
         <label>Batería mínima antes de recargar (%)
           <input type="number" id="set-elec-bateria-min" step="1" min="0" max="90" />
         </label>
+        <label class="check-label"><input type="checkbox" id="set-elec-carga-completa" /> Cargar siempre al 100% cada fin de semana (recomendado; si no, solo lo justo para la semana)</label>
       </fieldset>
       <button type="submit" class="btn-primary">Guardar ajustes</button>
     </form>

@@ -41,19 +41,20 @@ async function precioMedioCargaReal(settings) {
 }
 
 // Estrategia "cargar el fin de semana para toda la semana": cuanto costaria
-// cargar de golpe, el sabado/domingo, toda la energia que hace falta para
-// los dias de conduccion de la semana (settings.diasConduccionSemana),
-// limitado a lo que cabe en la bateria entre bateriaMinPct y el 100%. Si esa
-// energia no cabe entera en un fin de semana, el resto (remanenteKwh) se
-// valora al precio medio "entre semana" (precioMedioCargaReal) como
-// aproximacion de una recarga puntual entre semana.
+// cargar de golpe, el sabado/domingo, la energia del fin de semana -- por
+// defecto (cargaCompletaFinde) siempre hasta el 100% (asi es como de verdad
+// se usa el cargador), o si no solo la energia justa para los dias de
+// conduccion de la semana -- limitado a lo que cabe en la bateria entre
+// bateriaMinPct y el 100%. Si esa energia no cubre toda la semana, el resto
+// (remanenteKwh) se valora al precio medio "entre semana" (precioMedioCargaReal)
+// como aproximacion de una recarga puntual entre semana.
 async function estrategiaCargaFindeSemana(settings) {
   const cacheAll = await store.getElectricityCacheAll();
   if (cacheAll.length === 0) return null;
 
   const kwhSemana = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km * settings.diasConduccionSemana;
   const margenKwh = settings.electrico.capacidadBateriaKwh * (1 - settings.electrico.bateriaMinPct / 100);
-  const energiaFinde = Math.min(kwhSemana, margenKwh);
+  const energiaFinde = settings.electrico.cargaCompletaFinde ? margenKwh : Math.min(kwhSemana, margenKwh);
   const remanenteKwh = Math.max(0, kwhSemana - energiaFinde);
 
   const findes = calc.simulacionCargaFinesSemana({
@@ -75,6 +76,8 @@ async function estrategiaCargaFindeSemana(settings) {
   const costeSemana = energiaFinde * precioMedioEurKwh + remanenteKwh * (precioEntreSemanaEurKwh ?? 0);
   const precioEfectivoEurKwh = kwhSemana > 0 ? costeSemana / kwhSemana : precioMedioEurKwh;
 
+  const ultimo = validos[validos.length - 1];
+
   return {
     kwhSemana: Number(kwhSemana.toFixed(2)),
     energiaFinde: Number(energiaFinde.toFixed(2)),
@@ -85,6 +88,16 @@ async function estrategiaCargaFindeSemana(settings) {
     precioEfectivoEurKwh: Number(precioEfectivoEurKwh.toFixed(5)),
     costeSemana: Number(costeSemana.toFixed(2)),
     muestrasFinde: validos.length,
+    // Detalle del ultimo fin de semana con datos, para pintar el calendario
+    // semanal (que dias/horas se usaron de verdad, no un ejemplo generico).
+    ultimoFinde: {
+      sabado: ultimo.sabado,
+      domingo: ultimo.domingo,
+      kwh: ultimo.energiaCubiertaKwh,
+      costeTotal: ultimo.costeTotal,
+      precioMedioEurKwh: ultimo.precioMedioEurKwh,
+      bloques: calc.agrupaBloques(ultimo.horasUsadas),
+    },
   };
 }
 
@@ -232,6 +245,57 @@ router.post("/electricity/refresh-manana", async (req, res) => {
   }
 });
 
+// Backfill (una vez, o cuando falten dias): rellena los precios PVPC de los
+// sabados/domingos que falten entre `desde` (por defecto, tu primer
+// repostaje de diesel) y hoy. Sin esto solo hay historico de fin de semana
+// desde que la app empezo a correr; con esto la comparativa real puede
+// sumar el coste de CADA fin de semana pasado en vez de extrapolar un
+// precio medio. Secuencial y con pausa entre peticiones para no machacar
+// la API de REE -- puede tardar bastante si faltan muchos findes.
+router.post("/electricity/backfill-findes", async (req, res) => {
+  try {
+    let desde = req.query.desde;
+    if (!desde) {
+      const fills = await store.getDieselFills();
+      if (fills.length === 0) {
+        return res.status(400).json({ error: "No hay repostajes guardados; indica ?desde=YYYY-MM-DD" });
+      }
+      desde = fills[0].fecha;
+    }
+
+    const hoy = fechaISO(0);
+    const fechas = [];
+    let cursor = desde;
+    while (cursor < hoy) {
+      const dow = calc.diaSemanaUTC(cursor);
+      if (dow === 6 || dow === 0) fechas.push(cursor);
+      cursor = calc.sumaDiasISO(cursor, 1);
+    }
+
+    const resultado = { desde, hasta: hoy, totalFindes: fechas.length, guardados: 0, yaEstaban: 0, fallidos: 0, errores: [] };
+    for (const fecha of fechas) {
+      const existente = await store.getElectricityForDate(fecha);
+      if (existente && Array.isArray(existente.horas) && existente.horas.length >= 20) {
+        resultado.yaEstaban++;
+        continue;
+      }
+      try {
+        const precios = await fetchElectricityPrices(new Date(fecha + "T12:00:00"));
+        await store.saveElectricityPrices(precios);
+        resultado.guardados++;
+      } catch (err) {
+        resultado.fallidos++;
+        resultado.errores.push({ fecha, error: err.message });
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    res.json(resultado);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------- Settings ----------
 
 router.get("/settings", async (req, res) => {
@@ -303,6 +367,7 @@ router.get("/summary", async (req, res) => {
           costeAnio: Number((costeDiaMedioSemana * 365).toFixed(2)),
           costePorKm: kmSemana > 0 ? Number((finde.costeSemana / kmSemana).toFixed(4)) : null,
           muestrasProyeccion: finde.muestrasFinde,
+          ultimoFinde: finde.ultimoFinde,
         };
       }
     } else if (electricidadHoy) {
@@ -548,6 +613,10 @@ router.get("/comparativa", async (req, res) => {
     const kmEstimados = (totalLitros / settings.diesel.consumoL100km) * 100;
     const kwhEquivalente = (kmEstimados / 100) * settings.electrico.consumoKwh100km;
 
+    const fechas = fills.map((f) => f.fecha).sort();
+    const desde = fechas[0];
+    const hasta = fechas[fechas.length - 1];
+
     // El €/kWh usado depende de la estrategia de carga elegida en ajustes:
     // "findes" usa el precio de cargar concentrado el fin de semana (mas
     // barato de verdad), "diaria" el precio medio de cargar cada dia en tus
@@ -555,27 +624,58 @@ router.get("/comparativa", async (req, res) => {
     const estrategiaFindes = settings.electrico.estrategiaCarga === "findes";
     let precioMedioEurKwh = null;
     let muestrasPrecioElec = 0;
+    let costeTeslaEstimado = null;
+    let esCosteRealHistorico = false;
+    let coberturaFindesPct = null;
+    let evolucionMensualElectricoReal = [];
+
     if (estrategiaFindes) {
-      const finde = await estrategiaCargaFindeSemana(settings);
-      if (finde) {
-        precioMedioEurKwh = finde.precioEfectivoEurKwh;
-        muestrasPrecioElec = finde.muestrasFinde;
+      // Si tenemos precios PVPC de fin de semana guardados para (case casi)
+      // todos los findes desde tu primer repostaje (ver /electricity/backfill-findes),
+      // no hace falta extrapolar: se suma el coste REAL de cada fin de semana
+      // de ese periodo, cargando siempre segun tu estrategia actual.
+      const cacheAll = await store.getElectricityCacheAll();
+      const margenKwh = settings.electrico.capacidadBateriaKwh * (1 - settings.electrico.bateriaMinPct / 100);
+      const kwhSemana = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km * settings.diasConduccionSemana;
+      const energiaFinde = settings.electrico.cargaCompletaFinde ? margenKwh : Math.min(kwhSemana, margenKwh);
+
+      const findes = calc.simulacionCargaFinesSemana({
+        dias: cacheAll,
+        energiaNecesariaSemanaKwh: energiaFinde,
+        potenciaCargaKw: settings.electrico.potenciaCargaKw,
+      });
+      const findesEnRango = findes.filter((f) => f.sabado >= desde && f.sabado <= hasta && f.precioMedioEurKwh != null);
+      const findesEsperados = Math.max(1, Math.round((new Date(hasta) - new Date(desde)) / (7 * 86400000)) + 1);
+      coberturaFindesPct = Number(((findesEnRango.length / findesEsperados) * 100).toFixed(0));
+
+      if (coberturaFindesPct >= 80) {
+        costeTeslaEstimado = Number(findesEnRango.reduce((a, f) => a + f.costeTotal, 0).toFixed(2));
+        esCosteRealHistorico = true;
+        muestrasPrecioElec = findesEnRango.length;
+        const energiaCubierta = findesEnRango.reduce((a, f) => a + f.energiaCubiertaKwh, 0);
+        precioMedioEurKwh = energiaCubierta > 0 ? Number((costeTeslaEstimado / energiaCubierta).toFixed(5)) : null;
+        evolucionMensualElectricoReal = calc.agrupaFindesPorMes(findesEnRango);
+      } else {
+        const finde = await estrategiaCargaFindeSemana(settings);
+        if (finde) {
+          precioMedioEurKwh = finde.precioEfectivoEurKwh;
+          muestrasPrecioElec = finde.muestrasFinde;
+          costeTeslaEstimado = Number((kwhEquivalente * precioMedioEurKwh).toFixed(2));
+        }
       }
     } else {
       const precioReal = await precioMedioCargaReal(settings);
       if (precioReal) {
         precioMedioEurKwh = precioReal.precioMedioEurKwh;
         muestrasPrecioElec = precioReal.muestras;
+        costeTeslaEstimado = Number((kwhEquivalente * precioReal.precioMedioEurKwh).toFixed(2));
       }
     }
-    const costeTeslaEstimado = precioMedioEurKwh != null ? kwhEquivalente * precioMedioEurKwh : null;
-
-    const fechas = fills.map((f) => f.fecha).sort();
 
     res.json({
       hayDatos: true,
-      desde: fechas[0],
-      hasta: fechas[fechas.length - 1],
+      desde,
+      hasta,
       numRepostajes: fills.length,
       totalLitros: Number(totalLitros.toFixed(1)),
       kmEstimados: Number(kmEstimados.toFixed(0)),
@@ -584,7 +684,10 @@ router.get("/comparativa", async (req, res) => {
       precioMedioEurKwh: precioMedioEurKwh != null ? Number(precioMedioEurKwh.toFixed(5)) : null,
       muestrasPrecioElec,
       estrategiaCarga: settings.electrico.estrategiaCarga,
-      costeTeslaEstimado: costeTeslaEstimado != null ? Number(costeTeslaEstimado.toFixed(2)) : null,
+      esCosteRealHistorico,
+      coberturaFindesPct,
+      evolucionMensualElectricoReal,
+      costeTeslaEstimado,
       diferencia: costeTeslaEstimado != null ? Number((costeDieselReal - costeTeslaEstimado).toFixed(2)) : null,
       precioDieselActual: dieselCache?.precioPorLitro ?? null,
     });
@@ -785,17 +888,52 @@ router.get("/electricity/simulation", async (req, res) => {
       store.getDieselFills(),
     ]);
 
-    const dias = calc.simulacionCargaRestringida({
-      dias: cacheAll,
-      kmDiaMedio: settings.electrico.kmDiaMedio,
-      consumoKwh100km: settings.electrico.consumoKwh100km,
-      potenciaCargaKw: settings.electrico.potenciaCargaKw,
-      horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo,
-      horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
-    });
-    dias.forEach((d) => {
-      d.bloques = calc.agrupaBloques(d.horasUsadas);
-    });
+    const esFindes = settings.electrico.estrategiaCarga === "findes";
+    let dias;
+
+    if (esFindes) {
+      // Simulacion fiel a la estrategia elegida: NO se carga entre semana
+      // (si registras una carga manual esa SI cuenta al precio real de ese
+      // dia, pero esta tabla automatica no se la inventa), y el fin de
+      // semana se carga de golpe usando las mejores horas del sabado Y el
+      // domingo JUNTOS -- nunca la media de un dia suelto -- hasta el 100%
+      // o hasta la energia justa de la semana, segun cargaCompletaFinde.
+      const margenKwh = settings.electrico.capacidadBateriaKwh * (1 - settings.electrico.bateriaMinPct / 100);
+      const kwhSemana = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km * settings.diasConduccionSemana;
+      const energiaFinde = settings.electrico.cargaCompletaFinde ? margenKwh : Math.min(kwhSemana, margenKwh);
+
+      const findes = calc.simulacionCargaFinesSemana({
+        dias: cacheAll,
+        energiaNecesariaSemanaKwh: energiaFinde,
+        potenciaCargaKw: settings.electrico.potenciaCargaKw,
+      });
+
+      dias = findes
+        .filter((f) => f.precioMedioEurKwh != null)
+        .map((f) => ({
+          fecha: f.sabado,
+          fechaFin: f.domingo,
+          esFinde: true,
+          energiaNecesariaKwh: Number(energiaFinde.toFixed(2)),
+          energiaCubiertaKwh: f.energiaCubiertaKwh,
+          costeTotal: f.costeTotal,
+          precioMedioEurKwh: f.precioMedioEurKwh,
+          coberturaPct: f.coberturaPct,
+          bloques: calc.agrupaBloques(f.horasUsadas),
+        }));
+    } else {
+      dias = calc.simulacionCargaRestringida({
+        dias: cacheAll,
+        kmDiaMedio: settings.electrico.kmDiaMedio,
+        consumoKwh100km: settings.electrico.consumoKwh100km,
+        potenciaCargaKw: settings.electrico.potenciaCargaKw,
+        horaSalidaTrabajo: settings.electrico.horaSalidaTrabajo,
+        horaLlegadaCasa: settings.electrico.horaLlegadaCasa,
+      });
+      dias.forEach((d) => {
+        d.bloques = calc.agrupaBloques(d.horasUsadas);
+      });
+    }
 
     const totalCoste = dias.reduce((a, d) => a + d.costeTotal, 0);
     const totalDias = dias.length;
@@ -803,11 +941,12 @@ router.get("/electricity/simulation", async (req, res) => {
     let gastoDieselMismoPeriodo = null;
     if (totalDias > 0) {
       const desde = dias[0].fecha;
-      const hasta = dias[dias.length - 1].fecha;
+      const hasta = dias[dias.length - 1].fechaFin || dias[dias.length - 1].fecha;
       gastoDieselMismoPeriodo = fills.filter((f) => f.fecha >= desde && f.fecha <= hasta).reduce((a, f) => a + f.costeTotal, 0);
     }
 
     res.json({
+      modo: esFindes ? "findes" : "diaria",
       dias,
       totalCoste: Number(totalCoste.toFixed(2)),
       totalDias,
