@@ -3,9 +3,12 @@
 const MINETUR_URL =
   "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/";
 
-// Coincidencia exacta de municipio para no confundir "Alcala de Henares" con
-// "Alcala de Guadaira" u otros municipios que empiecen igual.
-const MUNICIPIOS_OBJETIVO = ["guadalajara", "alcala de henares"];
+// Una sola estacion: la Ballenoil de Guadalajara capital en Calle Trafalgar.
+// En el municipio de Guadalajara hay OTRAS dos Ballenoil (Julian Besteiro y
+// Carretera Fontanar) que antes se promediaban con esta por error, dando un
+// precio que no correspondia con el que se ve de verdad en el surtidor.
+const MUNICIPIO_OBJETIVO = "guadalajara";
+const DIRECCION_OBJETIVO = "trafalgar";
 const MARCA_OBJETIVO = "ballenoil";
 
 function normaliza(texto) {
@@ -25,9 +28,8 @@ function parsePrecio(valor) {
 
 // La lista de TODA Espana pesa ~12 MB: en Render gratis (CPU muy limitada)
 // tardaba 37-50 s en descargarse y procesarse, mas que el timeout de 30 s
-// de cron-job.org. Las dos provincias que nos interesan (Guadalajara=19 y
-// Alcala de Henares, que es de Madrid=28) pesan ~1 MB en total.
-const PROVINCIAS_OBJETIVO = ["19", "28"];
+// de cron-job.org. Guadalajara (provincia 19) sola pesa mucho menos.
+const PROVINCIAS_OBJETIVO = ["19"];
 const TIMEOUT_MS = 20000;
 
 async function pideJson(url) {
@@ -54,7 +56,8 @@ async function fetchDieselPrice() {
 
   const estaciones = lista
     .filter((e) => normaliza(e["Rótulo"]).includes(MARCA_OBJETIVO))
-    .filter((e) => MUNICIPIOS_OBJETIVO.includes(normaliza(e["Municipio"])))
+    .filter((e) => normaliza(e["Municipio"]) === MUNICIPIO_OBJETIVO)
+    .filter((e) => normaliza(e["Dirección"]).includes(DIRECCION_OBJETIVO))
     .map((e) => ({
       rotulo: e["Rótulo"],
       municipio: e["Municipio"],
@@ -65,9 +68,7 @@ async function fetchDieselPrice() {
     .filter((e) => e.precioGasoleoA !== null);
 
   if (estaciones.length === 0) {
-    throw new Error(
-      "No se encontraron estaciones Ballenoil en Guadalajara o Alcala de Henares en la respuesta del Ministerio."
-    );
+    throw new Error("No se encontro la estacion Ballenoil de Guadalajara (Calle Trafalgar) en la respuesta del Ministerio.");
   }
 
   const precios = estaciones.map((e) => e.precioGasoleoA);

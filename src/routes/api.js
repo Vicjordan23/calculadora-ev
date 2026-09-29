@@ -101,6 +101,60 @@ async function estrategiaCargaFindeSemana(settings) {
   };
 }
 
+// Coste real de TENER el electrico, no solo de cargarlo: si hay una cuota
+// mensual (financiacion/renting/leasing), sumarla a la luz para saber si el
+// ahorro en combustible compensa de verdad esa cuota o no. Da una proyeccion
+// mensual (con el coste/mes ya calculado del resumen) y, si hay una fecha de
+// inicio (cuotaDesde), un acumulado real desde entonces con datos reales de
+// repostajes y (si la estrategia es "findes") del coste real de cada finde.
+async function calculaAmortizacion(settings, resumenDiesel, resumenElectrico) {
+  const cuotaMensual = settings.electrico.cuotaMensual;
+  if (!cuotaMensual || cuotaMensual <= 0) return null;
+
+  const mensual =
+    resumenDiesel && resumenElectrico
+      ? {
+          costeTotalMensualEv: Number((cuotaMensual + resumenElectrico.costeMes).toFixed(2)),
+          diferenciaMensual: Number((resumenDiesel.costeMes - (cuotaMensual + resumenElectrico.costeMes)).toFixed(2)),
+        }
+      : null;
+
+  let acumulado = null;
+  if (settings.electrico.cuotaDesde) {
+    const cuotaDesde = settings.electrico.cuotaDesde;
+    const hoy = fechaISO(0);
+    const diasTranscurridos = Math.max(0, Math.round((new Date(hoy) - new Date(cuotaDesde)) / 86400000));
+    const cuotaAcumulada = Number((cuotaMensual * (diasTranscurridos / 30)).toFixed(2));
+
+    const [fills, cacheAll] = await Promise.all([store.getDieselFills(), store.getElectricityCacheAll()]);
+    const dieselAcumulado = fills.filter((f) => f.fecha >= cuotaDesde).reduce((a, f) => a + f.costeTotal, 0);
+
+    let electricoAcumulado = 0;
+    if (settings.electrico.estrategiaCarga === "findes") {
+      const margenKwh = settings.electrico.capacidadBateriaKwh * (1 - settings.electrico.bateriaMinPct / 100);
+      const kwhSemana = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km * settings.diasConduccionSemana;
+      const energiaFinde = settings.electrico.cargaCompletaFinde ? margenKwh : Math.min(kwhSemana, margenKwh);
+      const findes = calc.simulacionCargaFinesSemana({ dias: cacheAll, energiaNecesariaSemanaKwh: energiaFinde, potenciaCargaKw: settings.electrico.potenciaCargaKw });
+      electricoAcumulado = findes
+        .filter((f) => f.sabado >= cuotaDesde && f.precioMedioEurKwh != null)
+        .reduce((a, f) => a + f.costeTotal, 0);
+    }
+
+    const costeTotalEvAcumulado = Number((cuotaAcumulada + electricoAcumulado).toFixed(2));
+    acumulado = {
+      cuotaDesde,
+      diasTranscurridos,
+      cuotaAcumulada,
+      dieselAcumulado: Number(dieselAcumulado.toFixed(2)),
+      electricoAcumulado: Number(electricoAcumulado.toFixed(2)),
+      costeTotalEvAcumulado,
+      diferenciaAcumulada: Number((dieselAcumulado - costeTotalEvAcumulado).toFixed(2)),
+    };
+  }
+
+  return { cuotaMensual, mensual, acumulado };
+}
+
 // ---------- Precio diesel ----------
 
 async function obtenerPrecioDieselFresco() {
@@ -429,6 +483,8 @@ router.get("/summary", async (req, res) => {
           }
         : null;
 
+    const amortizacion = await calculaAmortizacion(settings, resumenDiesel, resumenElectrico);
+
     res.json({
       settings,
       diesel,
@@ -436,6 +492,7 @@ router.get("/summary", async (req, res) => {
       resumenDiesel,
       resumenElectrico,
       ahorro,
+      amortizacion,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

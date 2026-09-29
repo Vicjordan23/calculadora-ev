@@ -1,7 +1,7 @@
 {
   "name": "calculadora-ev",
   "version": "0.1.0",
-  "description": "Calculadora de gasto: Tesla Model Y (carga en casa, tarifa PVPC) vs coche diesel (Ballenoil Guadalajara/Alcala de Henares)",
+  "description": "Calculadora de gasto: Tesla Model Y (carga en casa, tarifa PVPC) vs coche diesel (Ballenoil Guadalajara, Calle Trafalgar)",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

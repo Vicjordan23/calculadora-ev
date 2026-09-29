@@ -81,7 +81,7 @@ async function cargaResumen() {
 
   if (data.diesel) {
     document.getElementById("diesel-precio").textContent = fmtEur3(data.diesel.precioPorLitro);
-    document.getElementById("diesel-meta").textContent = `Publicado: ${data.diesel.fechaPublicacion} · ${data.diesel.estaciones.length} estaciones`;
+    document.getElementById("diesel-meta").textContent = `Publicado: ${data.diesel.fechaPublicacion} · ${data.diesel.estaciones[0]?.direccion || "Ballenoil Guadalajara"}`;
     ultimoPrecioDiesel = data.diesel.precioPorLitro;
     const repPrecio = document.getElementById("rep-precio");
     if (repPrecio && !repPrecio.value) repPrecio.value = ultimoPrecioDiesel;
@@ -154,6 +154,10 @@ async function cargaResumen() {
   document.getElementById("set-elec-estrategia").value = s.electrico.estrategiaCarga;
   document.getElementById("set-elec-bateria-min").value = s.electrico.bateriaMinPct;
   document.getElementById("set-elec-carga-completa").checked = !!s.electrico.cargaCompletaFinde;
+  document.getElementById("set-elec-cuota").value = s.electrico.cuotaMensual || "";
+  document.getElementById("set-elec-cuota-desde").value = s.electrico.cuotaDesde || "";
+
+  pintaAmortizacion(data.amortizacion, data.resumenDiesel);
 
   document.getElementById(
     "rec-hint"
@@ -234,6 +238,48 @@ function pintaSemanaCarga(r, elecSettings) {
     <div class="item"><span>Coste del finde</span><strong>${fmtEur(f.costeTotal)}</strong></div>
     <div class="item"><span>Previsión próximo finde</span><strong>${fmtEur(r.costeSemana)} <span style="font-weight:400;color:var(--text-dim);font-size:0.75em;">(media de ${r.muestrasProyeccion} finde${r.muestrasProyeccion === 1 ? "" : "s"})</span></strong></div>
   `;
+}
+
+// Coste real de TENER el electrico (cuota + luz) frente al ahorro "de
+// combustible" de las tarjetas de arriba, que no tiene en cuenta la cuota.
+function pintaAmortizacion(amortizacion, resumenDiesel) {
+  const panel = document.getElementById("panel-amortizacion");
+  if (!amortizacion) {
+    panel.classList.add("oculto");
+    return;
+  }
+  panel.classList.remove("oculto");
+
+  const m = amortizacion.mensual;
+  document.getElementById("amortizacion-mensual").innerHTML =
+    m && resumenDiesel
+      ? `
+    <div class="comp-box diesel">
+      <span>Diésel al mes (combustible)</span>
+      <strong>${fmtEur(resumenDiesel.costeMes)}</strong>
+    </div>
+    <div class="comp-box electrico">
+      <span>Cuota (${fmtEur(amortizacion.cuotaMensual)}) + luz al mes</span>
+      <strong>${fmtEur(m.costeTotalMensualEv)}</strong>
+    </div>
+    <div class="comp-box ahorro">
+      <span>Diferencia real al mes</span>
+      <strong style="color:${m.diferenciaMensual >= 0 ? "var(--ahorro)" : "var(--danger)"}">${m.diferenciaMensual >= 0 ? "+" : ""}${fmtEur(m.diferenciaMensual)}</strong>
+    </div>`
+      : `<div class="fetch-meta">Aún sin datos suficientes para la proyección mensual.</div>`;
+
+  const a = amortizacion.acumulado;
+  if (a) {
+    document.getElementById("amortizacion-meta").textContent = `Desde que pagas la cuota (${a.cuotaDesde}, ${a.diasTranscurridos} día${a.diasTranscurridos === 1 ? "" : "s"})`;
+    document.getElementById("amortizacion-acumulado").innerHTML = `
+      <div class="comp-box diesel"><span>Diésel real en ese periodo</span><strong>${fmtEur(a.dieselAcumulado)}</strong></div>
+      <div class="comp-box electrico"><span>Cuota + luz real en ese periodo</span><strong>${fmtEur(a.costeTotalEvAcumulado)}</strong></div>
+      <div class="comp-box ahorro"><span>Diferencia real acumulada</span><strong style="color:${a.diferenciaAcumulada >= 0 ? "var(--ahorro)" : "var(--danger)"}">${a.diferenciaAcumulada >= 0 ? "+" : ""}${fmtEur(a.diferenciaAcumulada)}</strong></div>
+    `;
+  } else {
+    document.getElementById("amortizacion-meta").textContent = "Indica la fecha desde la que pagas la cuota en Ajustes para ver el acumulado real (de momento solo es la proyección mensual).";
+    document.getElementById("amortizacion-acumulado").innerHTML = "";
+  }
 }
 
 function aplicaVisibilidadTesla(tiene) {
@@ -651,6 +697,12 @@ function initFormularios() {
     cargaTablaRepostajes();
   });
 
+  document.getElementById("btn-toggle-simulacion").addEventListener("click", (e) => {
+    e.preventDefault();
+    mostrarTodosSimulacion = !mostrarTodosSimulacion;
+    cargaSimulacion();
+  });
+
   document.getElementById("set-tiene-coche").addEventListener("change", (e) => {
     aplicaVisibilidadTesla(e.target.checked);
   });
@@ -724,6 +776,11 @@ function initFormularios() {
 
   document.getElementById("form-ajustes").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const cuotaMensualVal = Number(document.getElementById("set-elec-cuota").value) || 0;
+    const cuotaDesdeInput = document.getElementById("set-elec-cuota-desde").value;
+    // Si activas la cuota sin fijar fecha, se asume que empieza hoy (para no
+    // arrastrar meses anteriores en los que aun no se pagaba).
+    const cuotaDesdeVal = cuotaMensualVal > 0 ? cuotaDesdeInput || new Date().toISOString().slice(0, 10) : null;
     await api("/settings", {
       method: "POST",
       body: JSON.stringify({
@@ -743,6 +800,8 @@ function initFormularios() {
           estrategiaCarga: document.getElementById("set-elec-estrategia").value,
           bateriaMinPct: Number(document.getElementById("set-elec-bateria-min").value),
           cargaCompletaFinde: document.getElementById("set-elec-carga-completa").checked,
+          cuotaMensual: cuotaMensualVal,
+          cuotaDesde: cuotaDesdeVal,
         },
       }),
     });
@@ -860,6 +919,8 @@ async function cargaEvolucion() {
 
 const DIAS_SEMANA_CORTO = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 
+let mostrarTodosSimulacion = false;
+
 async function cargaSimulacion() {
   try {
     const data = await api("/electricity/simulation");
@@ -884,12 +945,15 @@ async function cargaSimulacion() {
     if (theadFecha) theadFecha.textContent = esFindes ? "Fin de semana" : "Fecha";
     if (theadKwh) theadKwh.textContent = esFindes ? "kWh cargados" : "kWh";
 
+    const LIMITE = esFindes ? 4 : Infinity;
+    const btnToggle = document.getElementById("btn-toggle-simulacion");
+    btnToggle.style.display = data.dias.length > LIMITE ? "inline-block" : "none";
+    btnToggle.textContent = mostrarTodosSimulacion ? "Ver menos" : `Ver todos (${data.dias.length})`;
+
     const tbody = document.querySelector("#tabla-simulacion tbody");
     tbody.innerHTML = "";
-    data.dias
-      .slice()
-      .reverse()
-      .forEach((d) => {
+    const paraMostrar = data.dias.slice().reverse();
+    (mostrarTodosSimulacion ? paraMostrar : paraMostrar.slice(0, LIMITE)).forEach((d) => {
         const tr = document.createElement("tr");
         if (esFindes) {
           const fmtDiaMes = (iso) => {

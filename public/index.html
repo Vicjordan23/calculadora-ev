@@ -113,6 +113,9 @@
       </thead>
       <tbody></tbody>
     </table>
+    <div class="tabla-header">
+      <button class="btn-secondary" id="btn-toggle-simulacion">Ver todos</button>
+    </div>
   </section>
 
   <section class="panel" id="seccion-estimacion">
@@ -122,7 +125,7 @@
       <div class="card diesel">
         <h2>🛢️ Diesel</h2>
         <div class="price" id="diesel-precio">—</div>
-        <div class="price-label">€/litro (Ballenoil Guadalajara / Alcalá de Henares)</div>
+        <div class="price-label">€/litro (Ballenoil Guadalajara, C/ Trafalgar)</div>
         <div class="tiles">
           <div class="tile"><span>Día</span><strong id="diesel-dia">—</strong></div>
           <div class="tile"><span>Semana</span><strong id="diesel-semana">—</strong></div>
@@ -325,8 +328,25 @@
         </label>
         <label class="check-label"><input type="checkbox" id="set-elec-carga-completa" /> Cargar siempre al 100% cada fin de semana (recomendado; si no, solo lo justo para la semana)</label>
       </fieldset>
+      <fieldset>
+        <legend>Cuota del coche</legend>
+        <label>Cuota mensual (financiación/renting) (€)
+          <input type="number" id="set-elec-cuota" step="1" min="0" placeholder="0 = no aplica" />
+        </label>
+        <label>Se paga desde
+          <input type="date" id="set-elec-cuota-desde" />
+        </label>
+      </fieldset>
       <button type="submit" class="btn-primary">Guardar ajustes</button>
     </form>
+  </section>
+
+  <section class="panel oculto" id="panel-amortizacion">
+    <h2>🚗 Coste real de tener el Tesla (con la cuota)</h2>
+    <p class="hint">El ahorro en combustible no es gratis si el coche tiene cuota: aquí se suma la cuota mensual a la luz para ver si compensa de verdad.</p>
+    <div class="comparativa-grid" id="amortizacion-mensual"></div>
+    <div class="fetch-meta" id="amortizacion-meta"></div>
+    <div class="comparativa-grid" id="amortizacion-acumulado" style="margin-top:14px"></div>
   </section>
 
   <section class="panel">

@@ -44,6 +44,14 @@ const DEFAULT_SETTINGS = {
     // que hace falta para la semana (un pelin mas barato en teoria, pero no
     // deja margen).
     cargaCompletaFinde: true,
+    // Cuota mensual del coche (financiacion/renting/leasing), si la hay. Es
+    // un gasto fijo real que hay que sumar a la luz para saber el coste
+    // total de verdad de tener el electrico, no solo el ahorro en "combustible".
+    cuotaMensual: 0,
+    // Fecha desde la que se paga la cuota ("YYYY-MM-DD"); null = sin fijar
+    // (no se cuenta acumulado todavia). Por defecto se pone hoy al activar
+    // la cuota, para no arrastrar meses en los que aun no se pagaba.
+    cuotaDesde: null,
   },
 };
 
