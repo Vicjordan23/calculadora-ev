@@ -107,17 +107,34 @@ async function estrategiaCargaFindeSemana(settings) {
 // mensual (con el coste/mes ya calculado del resumen) y, si hay una fecha de
 // inicio (cuotaDesde), un acumulado real desde entonces con datos reales de
 // repostajes y (si la estrategia es "findes") del coste real de cada finde.
-async function calculaAmortizacion(settings, resumenDiesel, resumenElectrico) {
+async function calculaAmortizacion(settings, resumenDiesel, resumenElectrico, precioDieselActual) {
   const cuotaMensual = settings.electrico.cuotaMensual;
   if (!cuotaMensual || cuotaMensual <= 0) return null;
 
-  const mensual =
-    resumenDiesel && resumenElectrico
-      ? {
-          costeTotalMensualEv: Number((cuotaMensual + resumenElectrico.costeMes).toFixed(2)),
-          diferenciaMensual: Number((resumenDiesel.costeMes - (cuotaMensual + resumenElectrico.costeMes)).toFixed(2)),
-        }
-      : null;
+  let mensual = null;
+  if (resumenDiesel && resumenElectrico) {
+    const costeTotalMensualEv = Number((cuotaMensual + resumenElectrico.costeMes).toFixed(2));
+    const diferenciaMensual = Number((resumenDiesel.costeMes - costeTotalMensualEv).toFixed(2));
+
+    // Punto de equilibrio: dos formas de leer el mismo cruce (a que precio
+    // de diesel, o con que cuota maxima, la diferencia mensual seria 0). Los
+    // litros/mes se sacan de los litros/dia ya calculados (no depende de si
+    // el precio actual es alto o bajo).
+    const factorSemana = settings.diasConduccionSemana / 7;
+    const litrosMes = resumenDiesel.litrosDia * 30 * factorSemana;
+    const precioDieselNecesario = litrosMes > 0 ? Number((costeTotalMensualEv / litrosMes).toFixed(3)) : null;
+    const cuotaMaximaCompensa = Number((resumenDiesel.costeMes - resumenElectrico.costeMes).toFixed(2));
+
+    mensual = {
+      costeTotalMensualEv,
+      diferenciaMensual,
+      puntoEquilibrio: {
+        precioDieselActual: precioDieselActual ?? null,
+        precioDieselNecesario,
+        cuotaMaximaCompensa,
+      },
+    };
+  }
 
   let acumulado = null;
   if (settings.electrico.cuotaDesde) {
@@ -483,7 +500,7 @@ router.get("/summary", async (req, res) => {
           }
         : null;
 
-    const amortizacion = await calculaAmortizacion(settings, resumenDiesel, resumenElectrico);
+    const amortizacion = await calculaAmortizacion(settings, resumenDiesel, resumenElectrico, diesel?.precioPorLitro);
 
     res.json({
       settings,

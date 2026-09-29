@@ -347,6 +347,23 @@
     <div class="comparativa-grid" id="amortizacion-mensual"></div>
     <div class="fetch-meta" id="amortizacion-meta"></div>
     <div class="comparativa-grid" id="amortizacion-acumulado" style="margin-top:14px"></div>
+
+    <div class="punto-equilibrio" id="punto-equilibrio"></div>
+
+    <div class="simulador">
+      <h3>🎛️ Simulador "¿y si...?"</h3>
+      <p class="hint" style="margin-top:0">Cambia estos valores para ver el impacto al momento — no toca tus ajustes guardados.</p>
+      <div class="simulador-form">
+        <label>Precio diésel (€/L)
+          <input type="number" id="sim-precio-diesel" step="0.001" min="0" />
+        </label>
+        <label>Cuota mensual (€)
+          <input type="number" id="sim-cuota" step="1" min="0" />
+        </label>
+        <button type="button" class="btn-secondary" id="btn-sim-reset">Restablecer</button>
+      </div>
+      <div class="comparativa-grid" id="simulador-resultado" style="margin-top:14px"></div>
+    </div>
   </section>
 
   <section class="panel">

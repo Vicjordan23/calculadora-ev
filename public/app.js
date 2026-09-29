@@ -157,7 +157,7 @@ async function cargaResumen() {
   document.getElementById("set-elec-cuota").value = s.electrico.cuotaMensual || "";
   document.getElementById("set-elec-cuota-desde").value = s.electrico.cuotaDesde || "";
 
-  pintaAmortizacion(data.amortizacion, data.resumenDiesel);
+  pintaAmortizacion(data.amortizacion, data.resumenDiesel, data.resumenElectrico, data.settings.diasConduccionSemana);
 
   document.getElementById(
     "rec-hint"
@@ -240,12 +240,20 @@ function pintaSemanaCarga(r, elecSettings) {
   `;
 }
 
+// Contexto para el simulador "¿y si...?": se rellena cada vez que se pinta
+// la amortizacion, y los inputs recalculan a partir de esto sin volver a
+// llamar a la API (litrosDia/factorSemana ya reproducen la misma formula
+// que calc.costeDiesel, y el coste electrico se deja fijo -- ya es real y
+// pequeno frente al diesel/cuota, no hace falta tocarlo aqui).
+let simuladorContexto = null;
+
 // Coste real de TENER el electrico (cuota + luz) frente al ahorro "de
 // combustible" de las tarjetas de arriba, que no tiene en cuenta la cuota.
-function pintaAmortizacion(amortizacion, resumenDiesel) {
+function pintaAmortizacion(amortizacion, resumenDiesel, resumenElectrico, diasConduccionSemana) {
   const panel = document.getElementById("panel-amortizacion");
   if (!amortizacion) {
     panel.classList.add("oculto");
+    simuladorContexto = null;
     return;
   }
   panel.classList.remove("oculto");
@@ -280,6 +288,53 @@ function pintaAmortizacion(amortizacion, resumenDiesel) {
     document.getElementById("amortizacion-meta").textContent = "Indica la fecha desde la que pagas la cuota en Ajustes para ver el acumulado real (de momento solo es la proyección mensual).";
     document.getElementById("amortizacion-acumulado").innerHTML = "";
   }
+
+  const pe = m?.puntoEquilibrio;
+  const peDiv = document.getElementById("punto-equilibrio");
+  if (pe && pe.precioDieselNecesario != null) {
+    peDiv.innerHTML = `
+      <div>⚖️ <strong>Punto de equilibrio:</strong> con la cuota actual (${fmtEur(amortizacion.cuotaMensual)}), el diésel tendría que costar <strong>${fmtEur3(pe.precioDieselNecesario)}/L</strong> para que compensara del todo${pe.precioDieselActual != null ? ` (ahora está a ${fmtEur3(pe.precioDieselActual)}/L)` : ""}.</div>
+      <div style="margin-top:6px">O, al precio actual del diésel, la cuota tendría que ser ≤ <strong>${fmtEur(pe.cuotaMaximaCompensa)}/mes</strong> para no perder dinero (ahora pagas ${fmtEur(amortizacion.cuotaMensual)}).</div>
+    `;
+  } else {
+    peDiv.innerHTML = "";
+  }
+
+  if (resumenDiesel && resumenElectrico) {
+    simuladorContexto = {
+      litrosDia: resumenDiesel.litrosDia,
+      factorSemana: (diasConduccionSemana || 7) / 7,
+      electricoCosteMes: resumenElectrico.costeMes,
+      precioDieselDefault: pe?.precioDieselActual ?? null,
+      cuotaDefault: amortizacion.cuotaMensual,
+    };
+    document.getElementById("sim-precio-diesel").value = simuladorContexto.precioDieselDefault ?? "";
+    document.getElementById("sim-cuota").value = simuladorContexto.cuotaDefault;
+    actualizaSimulador();
+  } else {
+    simuladorContexto = null;
+  }
+}
+
+function actualizaSimulador() {
+  const resultado = document.getElementById("simulador-resultado");
+  if (!simuladorContexto) {
+    resultado.innerHTML = "";
+    return;
+  }
+  const precio = Number(document.getElementById("sim-precio-diesel").value) || 0;
+  const cuota = Number(document.getElementById("sim-cuota").value) || 0;
+  const { litrosDia, factorSemana, electricoCosteMes } = simuladorContexto;
+
+  const costeDieselMes = litrosDia * precio * 30 * factorSemana;
+  const costeEvMes = cuota + electricoCosteMes;
+  const diferencia = costeDieselMes - costeEvMes;
+
+  resultado.innerHTML = `
+    <div class="comp-box diesel"><span>Diésel/mes</span><strong>${fmtEur(costeDieselMes)}</strong></div>
+    <div class="comp-box electrico"><span>Cuota + luz/mes</span><strong>${fmtEur(costeEvMes)}</strong></div>
+    <div class="comp-box ahorro"><span>Diferencia</span><strong style="color:${diferencia >= 0 ? "var(--ahorro)" : "var(--danger)"}">${diferencia >= 0 ? "+" : ""}${fmtEur(diferencia)}</strong></div>
+  `;
 }
 
 function aplicaVisibilidadTesla(tiene) {
@@ -701,6 +756,16 @@ function initFormularios() {
     e.preventDefault();
     mostrarTodosSimulacion = !mostrarTodosSimulacion;
     cargaSimulacion();
+  });
+
+  document.getElementById("sim-precio-diesel").addEventListener("input", actualizaSimulador);
+  document.getElementById("sim-cuota").addEventListener("input", actualizaSimulador);
+  document.getElementById("btn-sim-reset").addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!simuladorContexto) return;
+    document.getElementById("sim-precio-diesel").value = simuladorContexto.precioDieselDefault ?? "";
+    document.getElementById("sim-cuota").value = simuladorContexto.cuotaDefault;
+    actualizaSimulador();
   });
 
   document.getElementById("set-tiene-coche").addEventListener("change", (e) => {

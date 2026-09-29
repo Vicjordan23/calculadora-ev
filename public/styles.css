@@ -407,6 +407,30 @@ code {
   font-size: 0.88rem;
 }
 
+.punto-equilibrio {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+.punto-equilibrio strong { color: var(--text); }
+
+.simulador {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.simulador h3 { margin: 0 0 4px; font-size: 1rem; }
+.simulador-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
 .semana-tira {
   display: flex;
   gap: 10px;
