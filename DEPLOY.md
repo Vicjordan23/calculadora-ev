@@ -65,13 +65,13 @@ Como Render gratis se duerme, necesitamos que algo externo llame a la app a las 
    - **URL**: `https://calculadora-ev.onrender.com/api/diesel/refresh`
    - **Método**: POST
    - **Horario**: todos los días a las **07:07** y otra vez a las **14:07** (dos cron jobs; evita las horas "redondas" como :00/:15/:30, donde se disparan miles de cron jobs a la vez)
-   - **Timeout**: 60 segundos (Render gratis puede tardar en despertar)
+   - **Timeout**: 30 segundos (es el máximo que permite cron-job.org; Render gratis tarda 20-25 s en despertar, así que la primera llamada tras un rato de inactividad puede dar "timeout" aunque la app la procese igual)
 3. Crea otro cron job:
    - **Título**: Refrescar PVPC de mañana
    - **URL**: `https://calculadora-ev.onrender.com/api/electricity/refresh-manana`
    - **Método**: POST
    - **Horario**: elige "Personalizado" y pon esta expresión crontab: `*/10 20-23 * * *` (cada 10 minutos entre las 20:00 y las 23:50, zona horaria Europe/Madrid)
-   - **Timeout**: 60 segundos
+   - **Timeout**: 30 segundos (el máximo permitido)
 
    Se ejecuta muchas veces a propósito: REE publica los precios de mañana entre las ~20:15 y las ~20:45 y no hay hora exacta. En cuanto los precios de mañana están guardados, las siguientes ejecuciones no hacen nada. Si aún no están publicados responde 200 con `"ok":false` (no cuenta como fallo del cron job).
 
@@ -83,7 +83,7 @@ Con esto, aunque tú no abras la app, los precios se mantienen actualizados solo
 
 ### Si los precios dejan de actualizarse
 
-1. Entra en cron-job.org → **Cronjobs** y mira el estado de los jobs. cron-job.org **desactiva un job solo** tras varios fallos seguidos (te avisa por email). El motivo habitual es el *timeout*: Render gratis tarda 20-30 s en despertar y el timeout por defecto de cron-job.org es 30 s. Reactiva el job y pon **Timeout = 60 segundos** en cada uno.
+1. Entra en cron-job.org → **Cronjobs** y mira el estado de los jobs. cron-job.org **desactiva un job solo** tras varios fallos seguidos (te avisa por email). El motivo habitual es el *timeout*: Render gratis tarda 20-30 s en despertar y cron-job.org no permite más de **30 s** de timeout, así que el margen es justo. Reactiva el job (o recréalo con método **POST**, que es lo que esperan los endpoints) y deja el timeout en 30 s. Si los fallos se repiten, una tarea programada de GitHub Actions admite timeouts largos y evita el límite.
 2. Mientras el job esté caído la app no se rompe: al abrirla (y en cada ping del cron) rellena sola los fines de semana recientes que falten, así que los números vuelven a ser correctos en cuanto la abres. Lo único que no puede hacer sola es tener el precio de **mañana** antes de que alguien la abra después de las 20:30.
 3. Para ver a qué hora y con qué resultado se han descargado los precios: `https://calculadora-ev.onrender.com/api/electricity/diagnostico` (guarda los últimos 40 intentos).
 
