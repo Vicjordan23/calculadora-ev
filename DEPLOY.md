@@ -81,6 +81,12 @@ Como Render gratis se duerme, necesitamos que algo externo llame a la app a las 
 
 Con esto, aunque tú no abras la app, los precios se mantienen actualizados solos.
 
+### Si los precios dejan de actualizarse
+
+1. Entra en cron-job.org → **Cronjobs** y mira el estado de los jobs. cron-job.org **desactiva un job solo** tras varios fallos seguidos (te avisa por email). El motivo habitual es el *timeout*: Render gratis tarda 20-30 s en despertar y el timeout por defecto de cron-job.org es 30 s. Reactiva el job y pon **Timeout = 60 segundos** en cada uno.
+2. Mientras el job esté caído la app no se rompe: al abrirla (y en cada ping del cron) rellena sola los fines de semana recientes que falten, así que los números vuelven a ser correctos en cuanto la abres. Lo único que no puede hacer sola es tener el precio de **mañana** antes de que alguien la abra después de las 20:30.
+3. Para ver a qué hora y con qué resultado se han descargado los precios: `https://calculadora-ev.onrender.com/api/electricity/diagnostico` (guarda los últimos 40 intentos).
+
 ## 5. Usarla desde el móvil como si fuera una app
 
 1. Abre `https://calculadora-ev.onrender.com` en el navegador del móvil (Chrome/Safari).

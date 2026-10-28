@@ -120,6 +120,14 @@ async function getElectricityForDate(fecha) {
   return JSON.parse(res.rows[0].payload);
 }
 
+// Solo las fechas que tenemos guardadas (sin cargar los 24 precios de cada
+// dia), para detectar huecos en el historico sin una consulta pesada.
+async function getElectricityDates() {
+  await init();
+  const res = await client.execute("SELECT fecha FROM electricity_cache");
+  return new Set(res.rows.map((r) => r.fecha));
+}
+
 async function saveElectricityPrices(dayResult) {
   await init();
   await client.execute({
@@ -283,6 +291,7 @@ module.exports = {
   saveDieselCache,
   getDieselHistory,
   getElectricityForDate,
+  getElectricityDates,
   saveElectricityPrices,
   getElectricityHistory,
   registraIntentoPvpc,

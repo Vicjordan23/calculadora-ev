@@ -197,6 +197,7 @@ router.get("/diesel/price", async (req, res) => {
 });
 
 router.post("/diesel/refresh", async (req, res) => {
+  rellenaHuecosRecientes().catch(() => {}); // en segundo plano: no retrasa la respuesta al cron
   try {
     const precio = await obtenerPrecioDieselFresco();
     // Respuesta minima a proposito: la usan crons externos (cron-job.org)
@@ -258,6 +259,49 @@ async function obtenerPreciosDia(fecha, { forzar = false } = {}) {
   }
 }
 
+// Autorreparacion: si el despertador externo (cron-job.org) falla unos dias,
+// quedan huecos en el historico de precios y la simulacion de fines de semana
+// se salta esas semanas (y la bateria estimada se descuadra). Esto rellena los
+// dias recientes que falten -- solo sabados/domingos con la estrategia "findes",
+// todos los dias con "diaria" --, empezando por los mas recientes, como mucho
+// `maxPeticiones` por llamada y con pausa entre peticiones para no machacar a
+// REE. Es idempotente: si no falta nada, solo hace una consulta ligera.
+let rellenandoHuecos = false;
+const huecoFallidoHasta = new Map();
+const ESPERA_TRAS_FALLO_HUECO_MS = 6 * 60 * 60 * 1000; // no reintentar un dia que REE no tiene a cada visita
+
+async function rellenaHuecosRecientes({ maxPeticiones = 6, diasAtras = 60 } = {}) {
+  if (rellenandoHuecos) return { omitido: true };
+  rellenandoHuecos = true;
+  try {
+    const settings = await store.getSettings();
+    const soloFindes = settings.electrico.estrategiaCarga === "findes";
+    const presentes = await store.getElectricityDates();
+    const hoy = fechaISO(0);
+
+    const faltan = [];
+    for (let f = calc.sumaDiasISO(hoy, -diasAtras); f < hoy; f = calc.sumaDiasISO(f, 1)) {
+      const dow = calc.diaSemanaUTC(f);
+      const cuenta = !soloFindes || dow === 0 || dow === 6;
+      if (cuenta && !presentes.has(f) && (huecoFallidoHasta.get(f) || 0) < Date.now()) faltan.push(f);
+    }
+
+    let guardados = 0;
+    for (const fecha of faltan.slice(-maxPeticiones).reverse()) {
+      try {
+        await obtenerPreciosDia(fecha, { forzar: true });
+        guardados++;
+      } catch (err) {
+        huecoFallidoHasta.set(fecha, Date.now() + ESPERA_TRAS_FALLO_HUECO_MS);
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return { faltan: faltan.length, guardados };
+  } finally {
+    rellenandoHuecos = false;
+  }
+}
+
 // Ligero, para pings de keep-alive.
 router.get("/health", (req, res) => {
   res.json({ ok: true });
@@ -303,6 +347,7 @@ router.post("/electricity/refresh", async (req, res) => {
 // Solo un error tecnico real (red, base de datos...) devuelve 5xx.
 router.post("/electricity/refresh-manana", async (req, res) => {
   const fecha = fechaISO(1);
+  rellenaHuecosRecientes().catch(() => {}); // en segundo plano: no retrasa la respuesta al cron
   try {
     const yaGuardado = await store.getElectricityForDate(fecha);
     if (yaGuardado && Array.isArray(yaGuardado.horas) && yaGuardado.horas.length >= 20) {
@@ -381,6 +426,10 @@ router.post("/settings", async (req, res) => {
 
 router.get("/summary", async (req, res) => {
   try {
+    // Rellena fines de semana recientes que falten (ver rellenaHuecosRecientes).
+    // Se espera un maximo de 8 s: si hay muchos huecos sigue en segundo plano.
+    await Promise.race([rellenaHuecosRecientes().catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
+
     const settings = await store.getSettings();
 
     let diesel = await store.getDieselCache();
@@ -430,8 +479,13 @@ router.get("/summary", async (req, res) => {
         let bateriaEstimadaPct = null;
         let diasDesdeUltimaCarga = null;
         if (finde.ultimoFinde) {
+          // Se parte del ultimo domingo del CALENDARIO (se carga todos los
+          // findes), no del ultimo finde con precios guardados: si faltan los
+          // precios de un finde, partir de uno antiguo daba una bateria de 0%.
           const hoy = fechaISO(0);
-          diasDesdeUltimaCarga = calc.diasLaborablesEntre(finde.ultimoFinde.domingo, hoy);
+          let ultimoDomingo = hoy;
+          while (calc.diaSemanaUTC(ultimoDomingo) !== 0) ultimoDomingo = calc.sumaDiasISO(ultimoDomingo, -1);
+          diasDesdeUltimaCarga = calc.diasLaborablesEntre(ultimoDomingo, hoy);
           const pctPorDiaConduccion = settings.electrico.capacidadBateriaKwh > 0 ? (kwhDiaMedio / settings.electrico.capacidadBateriaKwh) * 100 : 0;
           bateriaEstimadaPct = Math.max(0, Math.round(100 - diasDesdeUltimaCarga * pctPorDiaConduccion));
         }

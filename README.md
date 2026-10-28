@@ -44,6 +44,7 @@ Ver [DEPLOY.md](DEPLOY.md) para la guía paso a paso: desplegar gratis en Render
 - PWA instalable: manifest + iconos + service worker con cache del "cascarón" de la app (nunca de los precios), para que abra rápido y puedas añadirla a la pantalla de inicio del móvil.
 - Ajustes editables: consumos, km/día, días de conducción por semana, capacidad de batería, batería mínima antes de recargar, estrategia de carga, hora de llegada a casa / salida al trabajo y potencia de carga en casa.
 - Refresco automático programado: diesel a las 07:00 y 14:00, PVPC de mañana a las 20:35 y 21:00 (por si la publicación se retrasa). Además cada endpoint refresca solo si el dato en caché tiene más de 1h.
+- **Autorreparación de huecos**: si el despertador externo (cron-job.org) deja de funcionar unos días, la app rellena sola los sábados/domingos recientes (últimos 60 días) que falten en el histórico de precios, tanto al abrir la web como en cada ping del cron (máx. 6 días por vez, empezando por los más recientes). Así un fallo del cron ya no deja la simulación de fines de semana ni la batería estimada con datos viejos.
 
 Los datos se guardan en SQLite vía [libSQL](https://turso.tech/libsql): en local usa automáticamente un fichero en `data/app.db` (cero configuración); en producción usa una base de datos Turso gratuita a través de las variables de entorno `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN` (ver `.env.example` y [DEPLOY.md](DEPLOY.md)).
 
