@@ -1,0 +1,43 @@
+# Despertador de la app: llama a los endpoints de refresco desde los servidores
+# de GitHub. Sustituye a cron-job.org, cuyas peticiones programadas recibian un
+# HTTP 429 de Render. Las horas van en UTC (Madrid = UTC+2 en verano, UTC+1 en
+# invierno), asi que los rangos cubren los dos horarios.
+name: Refrescar precios
+
+on:
+  schedule:
+    - cron: "17 5 * * *" # diesel, a primera hora de la manana (~07:17 verano / 06:17 invierno)
+    - cron: "17 12 * * *" # diesel, a mediodia (~14:17 verano / 13:17 invierno)
+    - cron: "*/10 18-20 * * *" # PVPC de manana: REE lo publica sobre las 20:15-20:45 de Madrid
+  workflow_dispatch: # boton "Run workflow": lanza las dos cosas a la vez, para probar
+
+permissions: {}
+
+concurrency:
+  group: refrescar-precios
+  cancel-in-progress: false
+
+jobs:
+  refrescar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Llamar a la app
+        env:
+          BASE_URL: https://calculadora-ev.onrender.com
+          PROGRAMACION: ${{ github.event.schedule }}
+        run: |
+          # Render gratis tarda ~25 s en despertar y a veces responde 429: se
+          # reintenta con espera en cualquier error (--retry-all-errors).
+          llama() {
+            echo "POST $1"
+            curl --silent --show-error --fail-with-body \
+              --max-time 120 --retry 5 --retry-all-errors --retry-delay 20 \
+              -X POST "$BASE_URL$1"
+            echo
+          }
+          case "$PROGRAMACION" in
+            "*/10 18-20 * * *") llama /api/electricity/refresh-manana ;;
+            "")                 llama /api/diesel/refresh; llama /api/electricity/refresh-manana ;;
+            *)                  llama /api/diesel/refresh ;;
+          esac

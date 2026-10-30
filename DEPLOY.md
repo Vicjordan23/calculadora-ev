@@ -6,9 +6,9 @@ Vamos a usar 3 servicios gratuitos que **no piden tarjeta de crédito**:
 |---|---|---|
 | [Turso](https://turso.tech) | Base de datos (precios, historial de cargas) | Gratis |
 | [Render](https://render.com) | Ejecutar la app en internet | Gratis |
-| [cron-job.org](https://cron-job.org) | "Despertar" la app y refrescar precios a su hora | Gratis |
+| [GitHub Actions](https://docs.github.com/actions) | "Despertar" la app y refrescar precios a su hora | Gratis (viene con tu repositorio) |
 
-El plan gratuito de Render "duerme" la app tras 15 min sin uso (tarda ~30-50s en despertar la primera vez que la abres). Por eso los datos van en Turso (que no depende de si Render está dormido) y cron-job.org es quien la despierta a las horas clave para refrescar precios aunque tú no la estés usando.
+El plan gratuito de Render "duerme" la app tras 15 min sin uso (tarda ~25-50s en despertar la primera vez que la abres). Por eso los datos van en Turso (que no depende de si Render está dormido) y una tarea programada de GitHub Actions es quien la despierta a las horas clave para refrescar precios aunque tú no la estés usando.
 
 No puedo crear estas cuentas por ti (necesitan tu email/verificación), pero aquí tienes cada paso.
 
@@ -55,36 +55,31 @@ git push -u origin main
 6. Dale a **Create Web Service**. Tardará 1-2 minutos en desplegar.
 7. Cuando termine, te da una URL tipo `https://calculadora-ev.onrender.com`. Ábrela — es tu app, ya accesible desde cualquier sitio (casa, móvil con datos móviles, etc.), no solo desde este PC.
 
-## 4. Programar los refrescos automáticos con cron-job.org
+## 4. Programar los refrescos automáticos (GitHub Actions)
 
-Como Render gratis se duerme, necesitamos que algo externo llame a la app a las horas clave:
+Como Render gratis se duerme, necesitamos que algo externo llame a la app a las horas clave. El repositorio ya incluye `.github/workflows/refresh.yml`, que GitHub ejecuta solo: **no hay que crear cuentas ni configurar nada más** (si subiste el proyecto a GitHub en el paso 2, ya está). Hace esto:
 
-1. Entra en https://cron-job.org y crea una cuenta gratis.
-2. Crea un cron job:
-   - **Título**: Refrescar diesel
-   - **URL**: `https://calculadora-ev.onrender.com/api/diesel/refresh`
-   - **Método**: POST
-   - **Horario**: todos los días a las **07:07** y otra vez a las **14:07** (dos cron jobs; evita las horas "redondas" como :00/:15/:30, donde se disparan miles de cron jobs a la vez)
-   - **Timeout**: 30 segundos (es el máximo que permite cron-job.org; Render gratis tarda 20-25 s en despertar, así que la primera llamada tras un rato de inactividad puede dar "timeout" aunque la app la procese igual)
-3. Crea otro cron job:
-   - **Título**: Refrescar PVPC de mañana
-   - **URL**: `https://calculadora-ev.onrender.com/api/electricity/refresh-manana`
-   - **Método**: POST
-   - **Horario**: elige "Personalizado" y pon esta expresión crontab: `*/10 20-23 * * *` (cada 10 minutos entre las 20:00 y las 23:50, zona horaria Europe/Madrid)
-   - **Timeout**: 30 segundos (el máximo permitido)
+- **Diésel** (`POST /api/diesel/refresh`): dos veces al día, sobre las 07:17 y las 14:17 de Madrid.
+- **PVPC de mañana** (`POST /api/electricity/refresh-manana`): cada 10 minutos entre las ~20:00 y las ~22:50 de Madrid. REE publica los precios de mañana entre las ~20:15 y las ~20:45 y no hay hora exacta; en cuanto están guardados, las siguientes ejecuciones no hacen nada. Si aún no están publicados responde 200 con `"ok":false` (no es un fallo).
+- Las horas del fichero van en UTC y los rangos cubren horario de verano e invierno.
+- Si la app tarda en despertar (~25 s) o responde con un error, **reintenta hasta 5 veces con 20 s de espera**.
 
-   Se ejecuta muchas veces a propósito: REE publica los precios de mañana entre las ~20:15 y las ~20:45 y no hay hora exacta. En cuanto los precios de mañana están guardados, las siguientes ejecuciones no hacen nada. Si aún no están publicados responde 200 con `"ok":false` (no cuenta como fallo del cron job).
+Para probarlo a mano: pestaña **Actions** del repositorio → **Refrescar precios** → **Run workflow**. Verás en el registro las respuestas de la app.
 
-   ⚠️ La URL termina en `/refresh-manana`, no en `/refresh` a secas — esa otra siempre refresca el precio de **hoy**.
+Notas:
+- GitHub a veces retrasa las tareas programadas 5-15 minutos; no importa.
+- Si el repositorio pasa 60 días sin ninguna actividad, GitHub puede pausar las tareas programadas (repositorios públicos): se reactivan desde la pestaña Actions.
+- Si una ejecución falla, GitHub te avisa por email.
+- Para ver a qué hora aparecen realmente los precios cada día: `https://calculadora-ev.onrender.com/api/electricity/diagnostico`.
 
-   Para ver a qué hora aparecen realmente los precios cada día: `https://calculadora-ev.onrender.com/api/electricity/diagnostico`.
+> **Por qué no cron-job.org:** se probó y no sirve para esto. Render responde **HTTP 429 (Too Many Requests)** a las peticiones programadas de cron-job.org en cuanto las recibe, antes de llegar a la app (la prueba manual desde su consola sí funcionaba, las programadas no). Tras unos días de 429 seguidos, cron-job.org desactiva el job. No se arregla con ajustes (ni timeout ni frecuencia).
 
 Con esto, aunque tú no abras la app, los precios se mantienen actualizados solos.
 
 ### Si los precios dejan de actualizarse
 
-1. Entra en cron-job.org → **Cronjobs** y mira el estado de los jobs. cron-job.org **desactiva un job solo** tras varios fallos seguidos (te avisa por email). El motivo habitual es el *timeout*: Render gratis tarda 20-30 s en despertar y cron-job.org no permite más de **30 s** de timeout, así que el margen es justo. Reactiva el job (o recréalo con método **POST**, que es lo que esperan los endpoints) y deja el timeout en 30 s. Si los fallos se repiten, una tarea programada de GitHub Actions admite timeouts largos y evita el límite.
-2. Mientras el job esté caído la app no se rompe: al abrirla (y en cada ping del cron) rellena sola los fines de semana recientes que falten, así que los números vuelven a ser correctos en cuanto la abres. Lo único que no puede hacer sola es tener el precio de **mañana** antes de que alguien la abra después de las 20:30.
+1. Abre la pestaña **Actions** del repositorio en GitHub y mira las últimas ejecuciones de **Refrescar precios**: si salen en rojo, el registro dice qué respondió la app (por ejemplo un 429 o un 5xx de Render). Puedes lanzarla a mano con **Run workflow**.
+2. Mientras las tareas estén caídas la app no se rompe: al abrirla (y en cada ping) rellena sola los fines de semana recientes que falten, así que los números vuelven a ser correctos en cuanto la abres. Lo único que no puede hacer sola es tener el precio de **mañana** antes de que alguien la abra después de las 20:30.
 3. Para ver a qué hora y con qué resultado se han descargado los precios: `https://calculadora-ev.onrender.com/api/electricity/diagnostico` (guarda los últimos 40 intentos).
 
 ## 5. Usarla desde el móvil como si fuera una app
@@ -109,4 +104,4 @@ Render vuelve a desplegar solo en cuanto detecta el push a GitHub (puede tardar 
 
 ## Cuando quieras dejar de depender de que Render "duerma"
 
-Si más adelante te compras un Raspberry Pi o similar para tener casa, puedes mover la misma app allí sin tocar código: simplemente no defines `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` (usará un fichero SQLite local) o los mantienes (sigue usando Turso) y ejecutas `npm start` directamente en el Pi, dejándolo siempre encendido. En ese caso los cron internos de `server.js` (que ya están programados a las mismas horas) hacen innecesario cron-job.org.
+Si más adelante te compras un Raspberry Pi o similar para tener casa, puedes mover la misma app allí sin tocar código: simplemente no defines `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` (usará un fichero SQLite local) o los mantienes (sigue usando Turso) y ejecutas `npm start` directamente en el Pi, dejándolo siempre encendido. En ese caso los cron internos de `server.js` (que ya están programados a las mismas horas) hacen innecesaria la tarea de GitHub Actions.
