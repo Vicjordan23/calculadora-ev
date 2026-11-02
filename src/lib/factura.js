@@ -1,4 +1,4 @@
-// Parte de la factura de la luz que corresponde al coche (para repartirla con el compañero de piso).
+// Parte de la factura de la luz que corresponde al coche (para repartirla con tu mujer).
 // Las cargas ya llevan el coste de la energia con el PVPC de cada hora (precio con peajes y cargos,
 // sin impuestos); aqui solo se anaden los impuestos y se agrupa por ciclo de facturacion.
 const IEE = 0.0511269632; // impuesto electrico (factura de junio 2026)
