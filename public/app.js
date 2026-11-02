@@ -634,7 +634,38 @@ async function cargaTablaCargas() {
       cargaTablaCargas();
     });
   });
+
+  cargaFacturaCoche();
 }
+
+// ---------- Parte de la factura de la luz que es del coche ----------
+let cicloFactura = 0;
+let mensajeFactura = "";
+
+async function cargaFacturaCoche() {
+  const f = await api(`/factura-coche?ciclo=${cicloFactura}`);
+  const fmtDia = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+  document.getElementById("factura-periodo").textContent = `${fmtDia(f.desde)} – ${fmtDia(f.ultimoDia)}`;
+  document.getElementById("factura-kwh").textContent = `${f.kwh} kWh (${f.nCargas} cargas)`;
+  document.getElementById("factura-base").textContent = fmtEur(f.base);
+  document.getElementById("factura-imp").textContent = fmtEur(f.impuestoElectrico + f.iva);
+  document.getElementById("factura-total").textContent = fmtEur(f.total);
+  document.getElementById("factura-aviso").textContent = f.incompletas
+    ? `${f.incompletas} carga(s) sin precio PVPC completo: el total puede quedarse corto.`
+    : "";
+  mensajeFactura = `Luz del coche, ${fmtDia(f.desde)} – ${fmtDia(f.ultimoDia)}: ${f.kwh} kWh → ${f.total.toFixed(2).replace(".", ",")} € (impuestos incluidos)`;
+}
+
+document.getElementById("factura-prev").addEventListener("click", () => { cicloFactura--; cargaFacturaCoche(); });
+document.getElementById("factura-next").addEventListener("click", () => { cicloFactura++; cargaFacturaCoche(); });
+document.getElementById("factura-copiar").addEventListener("click", async (e) => {
+  try {
+    await navigator.clipboard.writeText(mensajeFactura);
+    e.target.textContent = "¡Copiado!";
+  } catch {
+    window.prompt("Copia el mensaje:", mensajeFactura);
+  }
+});
 
 function calculaEstadisticasRepostajes(fillsAsc) {
   const ahora = new Date();

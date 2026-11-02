@@ -3,6 +3,7 @@ const store = require("../lib/store");
 const { fetchDieselPrice } = require("../fetchers/diesel");
 const { fetchElectricityPrices, toDateParam } = require("../fetchers/electricity");
 const calc = require("../lib/calculations");
+const factura = require("../lib/factura");
 
 const router = express.Router();
 
@@ -682,6 +683,19 @@ router.post("/charges", async (req, res) => {
 
 router.delete("/charges/:id", async (req, res) => {
   res.json(await store.deleteCharge(req.params.id));
+});
+
+// Parte de la factura de la luz que corresponde al coche en un ciclo de facturacion
+// (?ciclo=0 actual, -1 anterior...; ?dia=3 dia de inicio del ciclo). Cargas en casa + impuestos.
+router.get("/factura-coche", async (req, res) => {
+  try {
+    const offset = Math.trunc(Number(req.query.ciclo) || 0);
+    const dia = Math.min(28, Math.max(1, Math.trunc(Number(req.query.dia) || 3)));
+    const ciclo = factura.cicloFacturacion(fechaISO(0), offset, dia);
+    res.json(factura.resumenFactura(await store.getCharges(), ciclo));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Repostajes reales de diesel ----------
