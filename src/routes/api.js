@@ -697,6 +697,26 @@ router.post("/charges", async (req, res) => {
       return res.status(201).json(registro);
     }
 
+    // Con tarifa fija ya vigente ese dia, la carga cuesta kWh x precio fijo: no
+    // hace falta saber a que horas fue ni se consulta el PVPC.
+    if (usaTarifaFijaEn(settings, fecha)) {
+      const precio = settings.tarifaLuz.precioFijoEurKwh;
+      const registro = await store.addCharge({
+        fecha,
+        horaInicio: horaInicio != null && horaInicio !== "" ? Number(horaInicio) : 0,
+        duracionHoras: Number(duracionHoras) || 0,
+        bateriaAntesPct: bateriaAntesPct != null ? Number(bateriaAntesPct) : null,
+        bateriaDespuesPct: bateriaDespuesPct != null ? Number(bateriaDespuesPct) : null,
+        kwhCargados: Number(kwh.toFixed(2)),
+        costeTotal: Number((kwh * precio).toFixed(2)),
+        precioMedioEurKwh: precio,
+        coberturaDatos: 100,
+        detalle: [],
+        tipo: "casa",
+      });
+      return res.status(201).json(registro);
+    }
+
     if (horaInicio == null || !duracionHoras) {
       return res.status(400).json({ error: "Faltan campos: horaInicio, duracionHoras" });
     }
