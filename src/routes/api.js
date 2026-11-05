@@ -15,6 +15,80 @@ function fechaISO(offsetDias = 0) {
   return toDateParam(d);
 }
 
+// ---------- Tarifa fija (precio plano, p.ej. 0,09 EUR/kWh las 24 h) ----------
+// Con tarifa fija cargar cuesta kWh x precio, a cualquier hora y dia: no hay
+// "horas baratas" que elegir. Las proyecciones hacia delante usan la fija en
+// cuanto esta elegida; lo ya pasado (simulaciones, acumulados) sigue en PVPC
+// hasta settings.tarifaLuz.fijaDesde.
+function tarifaFijaElegida(settings) {
+  return settings.tarifaLuz?.tipo === "fija" && settings.tarifaLuz.precioFijoEurKwh > 0;
+}
+
+function usaTarifaFijaEn(settings, fecha) {
+  if (!tarifaFijaElegida(settings)) return false;
+  const desde = settings.tarifaLuz.fijaDesde;
+  return !desde || fecha >= desde;
+}
+
+// Energia que de verdad se compra cada semana: la que se gasta conduciendo.
+function kwhSemanaConsumo(settings) {
+  return (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km * settings.diasConduccionSemana;
+}
+
+// Coste de un fin de semana simulado: el PVPC real de ese finde o, si ya
+// estaba la tarifa fija, el consumo semanal x precio fijo.
+function costeFindeSegunTarifa(settings, finde) {
+  return usaTarifaFijaEn(settings, finde.sabado) ? kwhSemanaConsumo(settings) * settings.tarifaLuz.precioFijoEurKwh : finde.costeTotal;
+}
+
+// Bateria estimada "hoy": se parte del ultimo domingo del CALENDARIO (se carga
+// los findes), no del ultimo finde con precios guardados, y se resta un dia de
+// consumo por cada dia laborable transcurrido. No hay integracion con el coche:
+// es una estimacion para avisar de cuando toca volver a cargar.
+function estimaBateria(settings, kwhDiaMedio) {
+  const hoy = fechaISO(0);
+  let ultimoDomingo = hoy;
+  while (calc.diaSemanaUTC(ultimoDomingo) !== 0) ultimoDomingo = calc.sumaDiasISO(ultimoDomingo, -1);
+  const diasDesdeUltimaCarga = calc.diasLaborablesEntre(ultimoDomingo, hoy);
+  const pctPorDia = settings.electrico.capacidadBateriaKwh > 0 ? (kwhDiaMedio / settings.electrico.capacidadBateriaKwh) * 100 : 0;
+  return { diasDesdeUltimaCarga, bateriaEstimadaPct: Math.max(0, Math.round(100 - diasDesdeUltimaCarga * pctPorDia)) };
+}
+
+// Resumen "Electrico" con tarifa fija: no depende de los precios por horas ni
+// de la estrategia de carga (da igual cuando enchufes: cuesta lo mismo).
+function resumenElectricoFijo(settings) {
+  const precio = settings.tarifaLuz.precioFijoEurKwh;
+  const kwhDiaMedio = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
+  const kwhSemana = kwhSemanaConsumo(settings);
+  const costeSemana = kwhSemana * precio;
+  const costeDiaMedioSemana = costeSemana / 7; // para escalar mes/año como el resto de la app
+  const kmSemana = settings.electrico.kmDiaMedio * settings.diasConduccionSemana;
+  const margenKwh = settings.electrico.capacidadBateriaKwh * (1 - settings.electrico.bateriaMinPct / 100);
+  const bateria = estimaBateria(settings, kwhDiaMedio);
+
+  return {
+    estrategia: "fija",
+    tarifaFija: true,
+    kwhDia: Number(kwhDiaMedio.toFixed(2)),
+    kwhSemana: Number(kwhSemana.toFixed(2)),
+    diasConduccionSemana: settings.diasConduccionSemana,
+    bateriaMinPct: settings.electrico.bateriaMinPct,
+    cubreSoloConFinde: kwhSemana <= margenKwh + 1e-6,
+    remanenteKwh: Number(Math.max(0, kwhSemana - margenKwh).toFixed(2)),
+    precioMedioEurKwh: precio,
+    costeSemana: Number(costeSemana.toFixed(2)),
+    costeDia: Number((costeSemana / settings.diasConduccionSemana).toFixed(2)),
+    costeMes: Number((costeDiaMedioSemana * 30).toFixed(2)),
+    costeAnio: Number((costeDiaMedioSemana * 365).toFixed(2)),
+    costePorKm: kmSemana > 0 ? Number((costeSemana / kmSemana).toFixed(4)) : null,
+    muestrasProyeccion: 0,
+    ultimoFinde: null,
+    cuotaFijaMensual: settings.tarifaLuz.cuotaFijaMensual,
+    fijaDesde: settings.tarifaLuz.fijaDesde,
+    ...bateria,
+  };
+}
+
 // Precio medio "real" de cargar: NUNCA la media de las 24h del dia, siempre
 // la media (entre los dias que tengamos guardados) de lo que costaria cada
 // dia cargando solo en las horas mas baratas dentro de la ventana real
@@ -155,7 +229,7 @@ async function calculaAmortizacion(settings, resumenDiesel, resumenElectrico, pr
       const findes = calc.simulacionCargaFinesSemana({ dias: cacheAll, energiaNecesariaSemanaKwh: energiaFinde, potenciaCargaKw: settings.electrico.potenciaCargaKw });
       electricoAcumulado = findes
         .filter((f) => f.sabado >= cuotaDesde && f.precioMedioEurKwh != null)
-        .reduce((a, f) => a + f.costeTotal, 0);
+        .reduce((a, f) => a + costeFindeSegunTarifa(settings, f), 0);
     }
 
     const costeTotalEvAcumulado = Number((cuotaAcumulada + electricoAcumulado).toFixed(2));
@@ -462,7 +536,10 @@ router.get("/summary", async (req, res) => {
     const estrategiaFindes = settings.electrico.estrategiaCarga === "findes";
     let resumenElectrico = null;
 
-    if (estrategiaFindes) {
+    if (tarifaFijaElegida(settings)) {
+      // Tarifa plana: el coste es kWh x precio fijo, enchufes cuando enchufes.
+      resumenElectrico = resumenElectricoFijo(settings);
+    } else if (estrategiaFindes) {
       // Coste real "de verdad" para quien carga concentrado el fin de
       // semana: no se paga el precio de cada dia entre semana, sino el de
       // las horas mas baratas del sabado/domingo, tirando de bateria el
@@ -472,24 +549,10 @@ router.get("/summary", async (req, res) => {
         const kmSemana = settings.electrico.kmDiaMedio * settings.diasConduccionSemana;
         const costeDiaMedioSemana = finde.costeSemana / 7; // para escalar mes/año como el resto de la app
 
-        // Bateria estimada "hoy": desde el domingo de la ultima carga completa
-        // (100%), resta un dia de consumo por cada dia laborable transcurrido
-        // desde entonces. No sabemos la bateria real (no hay integracion con
-        // el coche), pero es una estimacion razonable para avisar de cuando
-        // toca volver a cargar.
-        let bateriaEstimadaPct = null;
-        let diasDesdeUltimaCarga = null;
-        if (finde.ultimoFinde) {
-          // Se parte del ultimo domingo del CALENDARIO (se carga todos los
-          // findes), no del ultimo finde con precios guardados: si faltan los
-          // precios de un finde, partir de uno antiguo daba una bateria de 0%.
-          const hoy = fechaISO(0);
-          let ultimoDomingo = hoy;
-          while (calc.diaSemanaUTC(ultimoDomingo) !== 0) ultimoDomingo = calc.sumaDiasISO(ultimoDomingo, -1);
-          diasDesdeUltimaCarga = calc.diasLaborablesEntre(ultimoDomingo, hoy);
-          const pctPorDiaConduccion = settings.electrico.capacidadBateriaKwh > 0 ? (kwhDiaMedio / settings.electrico.capacidadBateriaKwh) * 100 : 0;
-          bateriaEstimadaPct = Math.max(0, Math.round(100 - diasDesdeUltimaCarga * pctPorDiaConduccion));
-        }
+        // Bateria estimada "hoy" (ver estimaBateria).
+        const { bateriaEstimadaPct, diasDesdeUltimaCarga } = finde.ultimoFinde
+          ? estimaBateria(settings, kwhDiaMedio)
+          : { bateriaEstimadaPct: null, diasDesdeUltimaCarga: null };
 
         resumenElectrico = {
           estrategia: "findes",
@@ -787,8 +850,13 @@ router.get("/comparativa", async (req, res) => {
     let esCosteRealHistorico = false;
     let coberturaFindesPct = null;
     let evolucionMensualElectricoReal = [];
+    const todoConTarifaFija = tarifaFijaElegida(settings) && usaTarifaFijaEn(settings, desde);
 
-    if (estrategiaFindes) {
+    if (todoConTarifaFija) {
+      // Todo el periodo ya con tarifa fija: coste exacto, kWh x precio.
+      precioMedioEurKwh = settings.tarifaLuz.precioFijoEurKwh;
+      costeTeslaEstimado = Number((kwhEquivalente * precioMedioEurKwh).toFixed(2));
+    } else if (estrategiaFindes) {
       // Si tenemos precios PVPC de fin de semana guardados para (case casi)
       // todos los findes desde tu primer repostaje (ver /electricity/backfill-findes),
       // no hace falta extrapolar: se suma el coste REAL de cada fin de semana
@@ -808,12 +876,18 @@ router.get("/comparativa", async (req, res) => {
       coberturaFindesPct = Number(((findesEnRango.length / findesEsperados) * 100).toFixed(0));
 
       if (coberturaFindesPct >= 80) {
-        costeTeslaEstimado = Number(findesEnRango.reduce((a, f) => a + f.costeTotal, 0).toFixed(2));
+        // Los findes posteriores al cambio a tarifa fija se valoran a precio fijo.
+        const detalle = findesEnRango.map((f) => ({
+          ...f,
+          costeTotal: costeFindeSegunTarifa(settings, f),
+          energiaCubiertaKwh: usaTarifaFijaEn(settings, f.sabado) ? kwhSemanaConsumo(settings) : f.energiaCubiertaKwh,
+        }));
+        costeTeslaEstimado = Number(detalle.reduce((a, f) => a + f.costeTotal, 0).toFixed(2));
         esCosteRealHistorico = true;
-        muestrasPrecioElec = findesEnRango.length;
-        const energiaCubierta = findesEnRango.reduce((a, f) => a + f.energiaCubiertaKwh, 0);
+        muestrasPrecioElec = detalle.length;
+        const energiaCubierta = detalle.reduce((a, f) => a + f.energiaCubiertaKwh, 0);
         precioMedioEurKwh = energiaCubierta > 0 ? Number((costeTeslaEstimado / energiaCubierta).toFixed(5)) : null;
-        evolucionMensualElectricoReal = calc.agrupaFindesPorMes(findesEnRango);
+        evolucionMensualElectricoReal = calc.agrupaFindesPorMes(detalle);
       } else {
         const finde = await estrategiaCargaFindeSemana(settings);
         if (finde) {
@@ -843,6 +917,7 @@ router.get("/comparativa", async (req, res) => {
       precioMedioEurKwh: precioMedioEurKwh != null ? Number(precioMedioEurKwh.toFixed(5)) : null,
       muestrasPrecioElec,
       estrategiaCarga: settings.electrico.estrategiaCarga,
+      tarifaFija: todoConTarifaFija,
       esCosteRealHistorico,
       coberturaFindesPct,
       evolucionMensualElectricoReal,
@@ -878,7 +953,11 @@ router.get("/electricity/evolution", async (req, res) => {
     const [charges, history, settings] = await Promise.all([store.getCharges(), store.getElectricityHistory(), store.getSettings()]);
     const evolucion = calc.evolucionMensual({
       registros: charges.map((c) => ({ fecha: c.fecha, costeTotal: c.costeTotal })),
-      historicoPrecios: history.map((h) => ({ fecha: h.fecha, precio: h.precioMedioEurKwh })),
+      // Desde el cambio a tarifa fija el precio "teorico" del dia es el fijo.
+      historicoPrecios: history.map((h) => ({
+        fecha: h.fecha,
+        precio: usaTarifaFijaEn(settings, h.fecha) ? settings.tarifaLuz.precioFijoEurKwh : h.precioMedioEurKwh,
+      })),
       kmDiaMedio: settings.electrico.kmDiaMedio,
       consumoPor100km: settings.electrico.consumoKwh100km,
       diasConduccionSemana: settings.diasConduccionSemana,
@@ -939,6 +1018,28 @@ router.get("/recommend", async (req, res) => {
     const kwhDiaMedio = (settings.electrico.kmDiaMedio / 100) * settings.electrico.consumoKwh100km;
 
     const bateriaActualPct = req.query.bateriaActualPct != null && req.query.bateriaActualPct !== "" ? Number(req.query.bateriaActualPct) : 30;
+
+    // Tarifa fija: da igual cuando enchufes, no hay horas baratas que buscar.
+    // Solo se informa de cuanta energia falta, cuanto cuesta y cuanto autonomia queda.
+    if (tarifaFijaElegida(settings)) {
+      const precio = settings.tarifaLuz.precioFijoEurKwh;
+      const kwhParaLlenar = Math.max(0, capacidadBateriaKwh - (bateriaActualPct / 100) * capacidadBateriaKwh);
+      const kwhHastaMinimo = Math.max(0, ((bateriaActualPct - settings.electrico.bateriaMinPct) / 100) * capacidadBateriaKwh);
+      return res.json({
+        tarifaFija: true,
+        precioEurKwh: precio,
+        bateriaActualPct,
+        bateriaMinPct: settings.electrico.bateriaMinPct,
+        capacidadBateriaKwh,
+        potenciaCargaKw,
+        kwhDiaMedio: Number(kwhDiaMedio.toFixed(2)),
+        kwhParaLlenar: Number(kwhParaLlenar.toFixed(1)),
+        costeLlenar: Number((kwhParaLlenar * precio).toFixed(2)),
+        horasParaLlenar: potenciaCargaKw > 0 ? Number((kwhParaLlenar / potenciaCargaKw).toFixed(1)) : null,
+        costeDiaConduccion: Number((kwhDiaMedio * precio).toFixed(2)),
+        diasAutonomia: kwhDiaMedio > 0 ? Number((kwhHastaMinimo / kwhDiaMedio).toFixed(1)) : null,
+      });
+    }
 
     const { mananaDisponible, disponiblesHoy, disponiblesManana } = await calculaHorasCandidatas({ ventana, potenciaCargaKw });
 
@@ -1093,6 +1194,20 @@ router.get("/electricity/simulation", async (req, res) => {
         d.bloques = calc.agrupaBloques(d.horasUsadas);
       });
     }
+
+    // Desde el cambio a tarifa fija ya no hay "mejores horas": cada fila cuesta
+    // kWh x precio fijo (en modo findes, el consumo de toda la semana).
+    dias.forEach((d) => {
+      if (!usaTarifaFijaEn(settings, d.fecha)) return;
+      const kwh = Number((esFindes ? kwhSemanaConsumo(settings) : d.energiaNecesariaKwh).toFixed(2));
+      d.energiaCubiertaKwh = kwh;
+      d.energiaNecesariaKwh = kwh;
+      d.costeTotal = Number((kwh * settings.tarifaLuz.precioFijoEurKwh).toFixed(2));
+      d.precioMedioEurKwh = settings.tarifaLuz.precioFijoEurKwh;
+      d.coberturaPct = 100;
+      d.bloques = [];
+      d.tarifaFija = true;
+    });
 
     const totalCoste = dias.reduce((a, d) => a + d.costeTotal, 0);
     const totalDias = dias.length;

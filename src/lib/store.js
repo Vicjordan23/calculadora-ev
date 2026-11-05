@@ -10,6 +10,18 @@ const DEFAULT_SETTINGS = {
   // ir a trabajar): las proyecciones de coste mensual/anual escalan por esto
   // en vez de asumir que se conduce los 7 dias de la semana.
   diasConduccionSemana: 5,
+  // Tarifa de la luz. "pvpc" = tarifa regulada con precio por horas (el coste de
+  // cargar depende de las horas elegidas). "fija" = precio plano (p.ej. 0,09
+  // EUR/kWh las 24 h): cargar cuesta kWh x precio, a cualquier hora y dia.
+  // cuotaFijaMensual es el extra fijo de esa tarifa (informativo: es de la casa,
+  // no se atribuye al coche). fijaDesde = primer dia con la tarifa fija; lo
+  // anterior sigue contando como PVPC en simulaciones y acumulados.
+  tarifaLuz: {
+    tipo: "pvpc",
+    precioFijoEurKwh: 0.09,
+    cuotaFijaMensual: 12,
+    fijaDesde: null,
+  },
   diesel: {
     consumoL100km: 6,
     kmDiaMedio: 60,
@@ -76,6 +88,7 @@ async function getSettings() {
   return {
     tieneCocheElectrico: stored.tieneCocheElectrico ?? DEFAULT_SETTINGS.tieneCocheElectrico,
     diasConduccionSemana: stored.diasConduccionSemana ?? DEFAULT_SETTINGS.diasConduccionSemana,
+    tarifaLuz: { ...DEFAULT_SETTINGS.tarifaLuz, ...(stored.tarifaLuz || {}) },
     diesel: { ...DEFAULT_SETTINGS.diesel, ...(stored.diesel || {}) },
     electrico: { ...DEFAULT_SETTINGS.electrico, ...(stored.electrico || {}) },
   };
@@ -86,6 +99,7 @@ async function saveSettings(partial) {
   const merged = {
     tieneCocheElectrico: partial.tieneCocheElectrico ?? current.tieneCocheElectrico,
     diasConduccionSemana: partial.diasConduccionSemana ?? current.diasConduccionSemana,
+    tarifaLuz: { ...current.tarifaLuz, ...(partial.tarifaLuz || {}) },
     diesel: { ...current.diesel, ...(partial.diesel || {}) },
     electrico: { ...current.electrico, ...(partial.electrico || {}) },
   };

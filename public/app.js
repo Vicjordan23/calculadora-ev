@@ -102,7 +102,18 @@ async function cargaResumen() {
     document.getElementById("elec-mes").textContent = fmtEur(r.costeMes);
     document.getElementById("elec-anio").textContent = fmtEur(r.costeAnio);
 
-    if (r.estrategia === "findes") {
+    if (r.estrategia === "fija") {
+      const desde = r.fijaDesde ? r.fijaDesde.split("-").reverse().join("/") : null;
+      document.getElementById("elec-precio-label").textContent = "€/kWh con tarifa fija (24 h, cualquier día)";
+      document.getElementById("elec-kwh-label").textContent = "kWh/semana";
+      document.getElementById("elec-kwh").textContent = `${r.kwhSemana} kWh`;
+      document.getElementById("elec-extra-label").textContent = "Cuándo cargar";
+      document.getElementById("elec-extra").textContent = "✅ Cuando quieras";
+      document.getElementById("elec-meta").textContent =
+        `Tarifa fija${desde ? ` desde el ${desde}` : ""}: cargar cuesta lo mismo a cualquier hora · ${r.diasConduccionSemana} días de conducción/semana` +
+        (r.cuotaFijaMensual > 0 ? ` · la cuota fija de la tarifa (${fmtEur(r.cuotaFijaMensual)}/mes) es de la casa, no se suma al coche` : "");
+      pintaSemanaCarga(r, data.settings.electrico);
+    } else if (r.estrategia === "findes") {
       document.getElementById("elec-precio-label").textContent = "€/kWh medio cargando en tus fines de semana más baratos";
       document.getElementById("elec-kwh-label").textContent = "kWh/semana";
       document.getElementById("elec-kwh").textContent = `${r.kwhSemana} kWh`;
@@ -156,8 +167,18 @@ async function cargaResumen() {
   document.getElementById("set-elec-carga-completa").checked = !!s.electrico.cargaCompletaFinde;
   document.getElementById("set-elec-cuota").value = s.electrico.cuotaMensual || "";
   document.getElementById("set-elec-cuota-desde").value = s.electrico.cuotaDesde || "";
+  document.getElementById("set-tarifa-tipo").value = s.tarifaLuz.tipo;
+  document.getElementById("set-tarifa-precio").value = s.tarifaLuz.precioFijoEurKwh;
+  document.getElementById("set-tarifa-cuota-fija").value = s.tarifaLuz.cuotaFijaMensual;
+  document.getElementById("set-tarifa-desde").value = s.tarifaLuz.fijaDesde || "";
 
   pintaAmortizacion(data.amortizacion, data.resumenDiesel, data.resumenElectrico, data.settings.diasConduccionSemana);
+
+  if (s.tarifaLuz.tipo === "fija") {
+    document.getElementById("rec-hint").textContent =
+      "Con tarifa fija cuesta lo mismo cargar a cualquier hora y cualquier día: no hay horas que evitar. Indica la batería que tienes y te digo cuánto falta y cuánto costaría llenarla.";
+    return;
+  }
 
   document.getElementById(
     "rec-hint"
@@ -167,13 +188,20 @@ async function cargaResumen() {
 // Visualiza la semana tipo: bateria al 100% el lunes, bajando con cada dia
 // de conduccion, y recarga completa el sabado/domingo con las horas reales
 // del ultimo fin de semana con datos (no un ejemplo generico).
+const HINT_SEMANA_FINDES =
+  "Batería al 100% el lunes, bajando con cada trayecto, y recarga completa el fin de semana con las horas más baratas de ese finde en concreto.";
+const HINT_SEMANA_FIJA =
+  "Con tarifa fija puedes enchufar cuando quieras. Aquí ves cómo baja la batería de lunes a viernes si cargas el finde; la estimación parte del último domingo, no de la batería real del coche.";
+
 function pintaSemanaCarga(r, elecSettings) {
   const panel = document.getElementById("panel-semana-carga");
-  if (!r.ultimoFinde) {
+  const fija = !!r.tarifaFija;
+  if (!r.ultimoFinde && !fija) {
     panel.classList.add("oculto");
     return;
   }
   panel.classList.remove("oculto");
+  panel.querySelector("p.hint").textContent = fija ? HINT_SEMANA_FIJA : HINT_SEMANA_FINDES;
 
   const capacidad = elecSettings.capacidadBateriaKwh;
   const kwhDia = r.kwhDia;
@@ -223,11 +251,30 @@ function pintaSemanaCarga(r, elecSettings) {
   const diaSemanaHoy = new Date().getDay(); // 0=dom, 5=vie, 6=sab
   const esFindeOVispera = diaSemanaHoy === 5 || diaSemanaHoy === 6 || diaSemanaHoy === 0;
   const avisoDiv = document.getElementById("aviso-carga");
-  if (esFindeOVispera && r.bateriaEstimadaPct != null && r.bateriaEstimadaPct <= r.bateriaMinPct + 20) {
+  if (fija) {
+    // Con tarifa fija no hay "dia de carga": avisa cualquier dia si la bateria esta baja.
+    if (r.bateriaEstimadaPct != null && r.bateriaEstimadaPct <= r.bateriaMinPct + 20) {
+      const costeLlenar = capacidad * (1 - r.bateriaEstimadaPct / 100) * r.precioMedioEurKwh;
+      avisoDiv.classList.remove("oculto");
+      avisoDiv.innerHTML = `⚡ <strong>Conviene enchufar.</strong> Batería estimada ~${r.bateriaEstimadaPct}%: llenarla cuesta ~${fmtEur(costeLlenar)} a ${fmtEur3(r.precioMedioEurKwh)}/kWh, a la hora que te venga bien.`;
+    } else {
+      avisoDiv.classList.add("oculto");
+    }
+  } else if (esFindeOVispera && r.bateriaEstimadaPct != null && r.bateriaEstimadaPct <= r.bateriaMinPct + 20) {
     avisoDiv.classList.remove("oculto");
     avisoDiv.innerHTML = `⚡ <strong>Te toca cargar este fin de semana.</strong> Batería estimada ~${r.bateriaEstimadaPct}%, previsión ~${fmtEur(r.costeSemana)} para llenarla al mejor precio.`;
   } else {
     avisoDiv.classList.add("oculto");
+  }
+
+  if (fija) {
+    document.getElementById("semana-resumen").innerHTML = `
+      <div class="item"><span>Precio</span><strong>${fmtEur3(r.precioMedioEurKwh)}/kWh, 24 h</strong></div>
+      <div class="item"><span>Energía por semana</span><strong>${r.kwhSemana} kWh</strong></div>
+      <div class="item"><span>Coste por semana</span><strong>${fmtEur(r.costeSemana)}</strong></div>
+      <div class="item"><span>Coste por mes</span><strong>${fmtEur(r.costeMes)}</strong></div>
+    `;
+    return;
   }
 
   const f = r.ultimoFinde;
@@ -383,6 +430,10 @@ async function cargaComparativa() {
         : "";
     meta.innerHTML = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes${data.precioMedioEurKwh != null ? ` a ${fmtEur3(data.precioMedioEurKwh)}/kWh (media de cargar ${esFindes ? "concentrado en tus fines de semana más baratos" : "en tus horas más baratas"}${data.muestrasPrecioElec > 0 ? `, ${textoMuestras} de histórico` : ""})` : ""}${etiquetaReal}`;
 
+    if (data.tarifaFija) {
+      meta.innerHTML = `${data.numRepostajes} repostajes desde ${data.desde} hasta ${data.hasta} · ${data.totalLitros} L · ~${data.kmEstimados} km recorridos (estimado a partir de los litros comprados) · ${data.kwhEquivalente} kWh equivalentes a ${fmtEur3(data.precioMedioEurKwh)}/kWh (<strong>tarifa fija</strong>: cuesta lo mismo cargues cuando cargues)`;
+    }
+
     if (data.evolucionMensualElectricoReal && data.evolucionMensualElectricoReal.length > 0) {
       try {
         const dieselMensual = await api("/diesel/evolution");
@@ -537,6 +588,21 @@ async function recomendar(bateriaActualPct, esReintento = false) {
   if (!esReintento) resultado.innerHTML = "Calculando...";
   try {
     const data = await api(`/recommend?bateriaActualPct=${bateriaActualPct}`);
+
+    if (data.tarifaFija) {
+      // Tarifa fija: sin horas que elegir, solo cuanto falta y cuanto cuesta.
+      resultado.innerHTML = `<div class="plan-opciones"><div class="plan-opcion recomendada">
+        <div class="badge">✅ Cuando quieras</div>
+        <h3>Llenar la batería (de ${data.bateriaActualPct}% a 100%)</h3>
+        <div class="precio-grande">${fmtEur3(data.precioEurKwh)}/kWh</div>
+        <div class="detalle-linea">${data.kwhParaLlenar} kWh · ~${data.horasParaLlenar} h de carga a ${data.potenciaCargaKw} kW · <strong>${fmtEur(data.costeLlenar)}</strong> en total</div>
+        <div class="detalle-linea">Un día de conducción (${data.kwhDiaMedio} kWh) cuesta ${fmtEur(data.costeDiaConduccion)}. Con la batería actual te da para ~${data.diasAutonomia} días hasta el ${data.bateriaMinPct}%.</div>
+        <div class="horas-lista">🔌 Enchufa a cualquier hora, hoy o mañana: cuesta lo mismo.</div>
+      </div></div>`;
+      ultimoPlan = data;
+      cargaGraficoDia(diaActual);
+      return;
+    }
 
     let html = "";
     if (!data.mananaDisponible) {
@@ -882,6 +948,12 @@ function initFormularios() {
       body: JSON.stringify({
         tieneCocheElectrico: document.getElementById("set-tiene-coche").checked,
         diasConduccionSemana: Number(document.getElementById("set-dias-semana").value),
+        tarifaLuz: {
+          tipo: document.getElementById("set-tarifa-tipo").value,
+          precioFijoEurKwh: Number(document.getElementById("set-tarifa-precio").value) || 0,
+          cuotaFijaMensual: Number(document.getElementById("set-tarifa-cuota-fija").value) || 0,
+          fijaDesde: document.getElementById("set-tarifa-desde").value || null,
+        },
         diesel: {
           consumoL100km: Number(document.getElementById("set-diesel-consumo").value),
           kmDiaMedio: Number(document.getElementById("set-diesel-km").value),
@@ -1062,7 +1134,7 @@ async function cargaSimulacion() {
             <td>${d.energiaCubiertaKwh} kWh</td>
             <td>${fmtEur(d.costeTotal)}</td>
             <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
-            <td>${formatoBloques(d.bloques)}</td>
+            <td>${d.tarifaFija ? "Tarifa fija: cualquier hora" : formatoBloques(d.bloques)}</td>
           `;
         } else {
           const diaSemana = DIAS_SEMANA_CORTO[new Date(d.fecha + "T00:00:00Z").getUTCDay()];
@@ -1072,7 +1144,7 @@ async function cargaSimulacion() {
             <td>${d.energiaNecesariaKwh} kWh</td>
             <td>${fmtEur(d.costeTotal)}</td>
             <td>${d.precioMedioEurKwh != null ? fmtEur3(d.precioMedioEurKwh) : "—"}</td>
-            <td>${formatoBloques(d.bloques)}</td>
+            <td>${d.tarifaFija ? "Tarifa fija: cualquier hora" : formatoBloques(d.bloques)}</td>
           `;
         }
         tbody.appendChild(tr);

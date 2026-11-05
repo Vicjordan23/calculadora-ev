@@ -345,6 +345,25 @@
         <label class="check-label"><input type="checkbox" id="set-elec-carga-completa" /> Cargar siempre al 100% cada fin de semana (recomendado; si no, solo lo justo para la semana)</label>
       </fieldset>
       <fieldset>
+        <legend>Tarifa de la luz</legend>
+        <label>Tarifa
+          <select id="set-tarifa-tipo">
+            <option value="pvpc">PVPC (regulada, precio por horas)</option>
+            <option value="fija">Fija (precio plano las 24 h)</option>
+          </select>
+        </label>
+        <label>Precio fijo (€/kWh)
+          <input type="number" id="set-tarifa-precio" step="0.001" min="0" />
+        </label>
+        <label>Cuota fija de la tarifa (€/mes)
+          <input type="number" id="set-tarifa-cuota-fija" step="0.5" min="0" />
+        </label>
+        <label>Tarifa fija desde
+          <input type="date" id="set-tarifa-desde" />
+        </label>
+        <p class="hint">Con tarifa fija cargar cuesta kWh × precio a cualquier hora y día. Lo anterior a la fecha de inicio sigue contando como PVPC. La cuota fija es de la casa (no se suma al coche).</p>
+      </fieldset>
+      <fieldset>
         <legend>Cuota del coche</legend>
         <label>Cuota mensual (financiación/renting) (€)
           <input type="number" id="set-elec-cuota" step="1" min="0" placeholder="0 = no aplica" />
